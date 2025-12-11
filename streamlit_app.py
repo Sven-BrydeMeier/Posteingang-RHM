@@ -691,6 +691,7 @@ if st.button("🚀 Verarbeitung starten", type="primary", disabled=not can_proce
                         'gesamt_excel': bytes(gesamt_excel),  # Explizite Kopie
                         'sachbearbeiter_stats': dict(sachbearbeiter_stats)  # Explizite Kopie
                     }
+                    st.session_state.alle_daten = alle_daten  # Für manuelle Nachbearbeitung
                     st.session_state.verarbeitung_abgeschlossen = True  # Flag setzen
 
                 except Exception as e:
@@ -875,6 +876,191 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
 
                     except Exception as e:
                         st.error(f"❌ Fehler beim Email-Versand: {str(e)}")
+
+        # === MANUELLE NACHBEARBEITUNG ===
+        st.markdown("---")
+        st.subheader("🔍 Manuelle Nachbearbeitung")
+
+        # Prüfe ob nicht-zugeordnete Dokumente vorhanden
+        if 'alle_daten' in st.session_state and st.session_state.get('alle_daten'):
+            alle_daten = st.session_state.alle_daten
+
+            # Filtere nicht-zugeordnete Dokumente
+            nicht_zugeordnet = [d for d in alle_daten if d['sachbearbeiter'] == 'nicht-zugeordnet']
+
+            if nicht_zugeordnet:
+                st.warning(f"⚠️ {len(nicht_zugeordnet)} Dokument(e) konnten nicht automatisch zugeordnet werden.")
+                st.info("👉 Sie können diese Dokumente jetzt manuell zuordnen. Das System lernt aus Ihren Zuordnungen!")
+
+                with st.expander(f"📋 {len(nicht_zugeordnet)} nicht-zugeordnete Dokumente bearbeiten", expanded=False):
+                    # Initialisiere Training-Database
+                    from training_database import TrainingDatabase
+                    training_db = TrainingDatabase(storage.storage_dir)
+
+                    # Zeige Statistiken
+                    stats = training_db.get_statistics()
+                    if stats['total_training_entries'] > 0:
+                        st.info(f"📚 **Training-Datenbank**: {stats['total_training_entries']} Einträge | "
+                                f"{stats['unique_absender']} eindeutige Absender")
+
+                    # Session State für aktuelles Dokument
+                    if 'current_manual_doc_index' not in st.session_state:
+                        st.session_state.current_manual_doc_index = 0
+
+                    current_index = st.session_state.current_manual_doc_index
+
+                    if current_index < len(nicht_zugeordnet):
+                        current_doc = nicht_zugeordnet[current_index]
+
+                        st.markdown(f"### Dokument {current_index + 1} von {len(nicht_zugeordnet)}")
+
+                        # Zwei Spalten: PDF-Viewer links, Zuordnung rechts
+                        col_pdf, col_assign = st.columns([2, 1], gap="large")
+
+                        with col_pdf:
+                            st.markdown("#### 📄 Dokument-Vorschau")
+
+                            # PDF als Base64 in iframe
+                            import base64
+                            pdf_bytes = current_doc['dokument']['pdf_bytes']
+                            pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+                            pdf_display = f'<iframe src="data:application/pdf;base64,{pdf_base64}" width="100%" height="600px" type="application/pdf"></iframe>'
+                            st.markdown(pdf_display, unsafe_allow_html=True)
+
+                            # Textauszug
+                            with st.expander("📝 Text-Auszug (erste 500 Zeichen)"):
+                                text = current_doc['dokument']['text']
+                                st.text(text[:500] + "..." if len(text) > 500 else text)
+
+                        with col_assign:
+                            st.markdown("#### ✏️ Manuelle Zuordnung")
+
+                            # Extrahiere Absender aus Analyse
+                            absender = current_doc['analyse'].get('gegner', 'Unbekannt')
+                            st.info(f"**Absender**: {absender}")
+
+                            # Prüfe ob Training-Daten vorhanden
+                            pattern = training_db.find_matching_pattern(absender)
+                            if pattern:
+                                fuzzy = " (ähnlich)" if pattern.get('fuzzy_match') else ""
+                                st.success(f"✨ **KI-Vorschlag{fuzzy}**:\n\n"
+                                          f"Sachbearbeiter: **{pattern['sachbearbeiter']}**\n\n"
+                                          f"Basiert auf {pattern['haeufigkeit']} früheren Zuordnung(en)")
+
+                                # Vorschlag übernehmen?
+                                if st.button("✅ Vorschlag übernehmen", key=f"accept_suggestion_{current_index}"):
+                                    # Zuordnung durchführen
+                                    current_doc['sachbearbeiter'] = pattern['sachbearbeiter']
+                                    # Training speichern
+                                    training_db.save_training_entry(
+                                        absender=absender,
+                                        aktenzeichen=current_doc['aktenzeichen_info'].get('internes_az', 'unbekannt'),
+                                        sachbearbeiter=pattern['sachbearbeiter']
+                                    )
+                                    st.success(f"✅ Dokument zu {pattern['sachbearbeiter']} zugeordnet!")
+                                    # Nächstes Dokument
+                                    st.session_state.current_manual_doc_index += 1
+                                    st.rerun()
+
+                                st.markdown("---")
+
+                            # Option 1: Aktenzeichen manuell eingeben
+                            st.markdown("**Option 1: Aktenzeichen eingeben**")
+                            manual_az = st.text_input(
+                                "Aktenzeichen:",
+                                placeholder="z.B. 12345/01",
+                                key=f"manual_az_{current_index}",
+                                help="Geben Sie das Aktenzeichen aus dem Dokument ein"
+                            )
+
+                            if manual_az:
+                                # Prüfe gegen Register
+                                from aktenzeichen_erkennung import AktenzeichenErkenner
+                                # Lade Register
+                                if storage.has_aktenregister():
+                                    excel_path = storage.aktenregister_file
+                                    erkenner = AktenzeichenErkenner(excel_path)
+                                    register_info = erkenner._pruefe_register(manual_az)
+
+                                    if register_info:
+                                        st.success(f"✅ Im Register gefunden: **{register_info['kuerzel']}**")
+
+                                        if st.button("💾 Zuordnung speichern", key=f"save_manual_{current_index}"):
+                                            # Aktualisiere Dokument
+                                            current_doc['sachbearbeiter'] = register_info['kuerzel']
+                                            current_doc['aktenzeichen_info'] = register_info
+
+                                            # Training speichern
+                                            training_db.save_training_entry(
+                                                absender=absender,
+                                                aktenzeichen=manual_az,
+                                                sachbearbeiter=register_info['kuerzel']
+                                            )
+
+                                            st.success(f"✅ Zugeordnet zu {register_info['kuerzel']}!")
+                                            st.session_state.current_manual_doc_index += 1
+                                            st.rerun()
+                                    else:
+                                        st.warning("⚠️ Aktenzeichen nicht im Register gefunden")
+
+                                        # Manuelle Sachbearbeiter-Auswahl
+                                        sb_manual = st.selectbox(
+                                            "Sachbearbeiter auswählen:",
+                                            options=['SQ', 'TS', 'M', 'CV', 'FÜ'],
+                                            key=f"sb_manual_{current_index}"
+                                        )
+
+                                        if st.button("💾 Zuordnung speichern", key=f"save_manual_no_reg_{current_index}"):
+                                            current_doc['sachbearbeiter'] = sb_manual
+                                            current_doc['aktenzeichen_info']['internes_az'] = f"{manual_az}{sb_manual}"
+
+                                            training_db.save_training_entry(
+                                                absender=absender,
+                                                aktenzeichen=manual_az,
+                                                sachbearbeiter=sb_manual
+                                            )
+
+                                            st.success(f"✅ Zugeordnet zu {sb_manual}!")
+                                            st.session_state.current_manual_doc_index += 1
+                                            st.rerun()
+
+                            st.markdown("---")
+
+                            # Option 2: Nur Sachbearbeiter auswählen
+                            st.markdown("**Option 2: Direkte Sachbearbeiter-Zuordnung**")
+                            sb_direct = st.selectbox(
+                                "Sachbearbeiter:",
+                                options=['SQ', 'TS', 'M', 'CV', 'FÜ'],
+                                key=f"sb_direct_{current_index}"
+                            )
+
+                            if st.button("💾 Nur Sachbearbeiter zuordnen", key=f"save_direct_{current_index}"):
+                                current_doc['sachbearbeiter'] = sb_direct
+
+                                training_db.save_training_entry(
+                                    absender=absender,
+                                    aktenzeichen=current_doc['aktenzeichen_info'].get('internes_az', 'unbekannt'),
+                                    sachbearbeiter=sb_direct
+                                )
+
+                                st.success(f"✅ Zugeordnet zu {sb_direct}!")
+                                st.session_state.current_manual_doc_index += 1
+                                st.rerun()
+
+                            # Dokument überspringen
+                            st.markdown("---")
+                            if st.button("⏭️ Überspringen", key=f"skip_{current_index}"):
+                                st.session_state.current_manual_doc_index += 1
+                                st.rerun()
+
+                    else:
+                        st.success("🎉 Alle Dokumente bearbeitet!")
+                        if st.button("🔄 Neu starten"):
+                            st.session_state.current_manual_doc_index = 0
+                            st.rerun()
+
+            else:
+                st.success("✅ Alle Dokumente wurden automatisch zugeordnet!")
 
         # Button zum Löschen der Ergebnisse
         if st.button("🗑️ Ergebnisse löschen und neu verarbeiten"):
