@@ -92,10 +92,15 @@ class AktenzeichenErkenner:
         'dr.', 'dr', 'doktor'
     ]
 
-    # Schlagwörter für "Ihr Zeichen" etc.
+    # Schlagwörter für "Ihr Zeichen" etc. (erweitert für bessere Erkennung)
     ZEICHEN_KEYWORDS = [
-        'ihr zeichen', 'unser zeichen', 'ihr az', 'ihr az.',
-        'ihr aktenzeichen', 'dortiges aktenzeichen', 'verwendungszweck'
+        'ihr zeichen', 'ihr zeichen:', 'ihr-zeichen', 'ihr-zeichen:',
+        'unser zeichen', 'unser zeichen:', 'unser-zeichen', 'unser-zeichen:',
+        'ihr az', 'ihr az.', 'ihr az:', 'ihr az.:',
+        'ihr aktenzeichen', 'ihr aktenzeichen:', 'ihr-aktenzeichen',
+        'dortiges aktenzeichen', 'dortiges aktenzeichen:',
+        'verwendungszweck', 'verwendungszweck:',
+        'aktenzeichen:', 'az:', 'az.:'
     ]
 
     # Externe Aktenzeichen-Schlagwörter
@@ -293,6 +298,9 @@ class AktenzeichenErkenner:
         """
         Sucht nach Aktenzeichen in "Ihr Zeichen / Unser Zeichen" etc. Zeilen
         Höchste Priorität!
+
+        Erweitert: Durchsucht bis zu 3 Zeilen nach dem Keyword und
+        unterstützt verschiedene Aktenzeichen-Formate
         """
         lines = text.split('\n')
 
@@ -301,69 +309,113 @@ class AktenzeichenErkenner:
 
             # Prüfe, ob Zeile ein Zeichen-Keyword enthält
             if any(kw in line_lower for kw in self.ZEICHEN_KEYWORDS):
-                # Suche in dieser und der nächsten Zeile (wegen Umbruch)
+                # Suche in dieser und den nächsten 2 Zeilen (wegen Umbruch)
                 such_text = line
-                if i + 1 < len(lines):
-                    such_text += " " + lines[i + 1]
+                for offset in range(1, 3):  # Nächste 2 Zeilen
+                    if i + offset < len(lines):
+                        such_text += " " + lines[i + offset]
 
-                # Suche nach Stamm
-                stamm_match = re.search(r'\b(\d{1,5}/\d{2})', such_text)
-                if stamm_match:
-                    stamm = stamm_match.group(1)
+                # Erweiterte Regex: Unterstützt verschiedene Formate
+                # Format 1: 12345/01 oder 12345/1 (Standard)
+                # Format 2: 12345-01 oder 12345-1 (Bindestrich)
+                # Format 3: 12345.01 oder 12345.1 (Punkt)
+                stamm_patterns = [
+                    r'\b(\d{1,5})[/](\d{1,2})\b',  # 12345/01
+                    r'\b(\d{1,5})[-](\d{1,2})\b',  # 12345-01
+                    r'\b(\d{1,5})[.](\d{1,2})\b',  # 12345.01
+                ]
 
-                    # Hole Text nach dem Stamm (Suffix)
-                    start_pos = stamm_match.end()
-                    suffix = such_text[start_pos:start_pos + 20]  # max 20 Zeichen
+                for pattern in stamm_patterns:
+                    stamm_match = re.search(pattern, such_text)
+                    if stamm_match:
+                        # Normalisiere zu Slash-Format
+                        zahl1, zahl2 = stamm_match.groups()
+                        # Fülle Jahr mit führender Null auf (1 → 01)
+                        zahl2_padded = zahl2.zfill(2)
+                        stamm = f"{zahl1}/{zahl2_padded}"
 
-                    # Suche Kürzel im Suffix (direkt nach Stamm, ohne Leerzeichen)
-                    kuerzel = self._finde_kuerzel_im_text(suffix, position_sensitive=True)
+                        # Hole Text nach dem Stamm (Suffix)
+                        start_pos = stamm_match.end()
+                        suffix = such_text[start_pos:start_pos + 20]  # max 20 Zeichen
 
-                    if kuerzel:
-                        # Kürzel gefunden!
-                        kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
-                        return {
-                            'internes_az': f"{stamm}{kuerzel_norm}",
-                            'stamm': stamm,
-                            'kuerzel': kuerzel_norm
-                        }
-                    else:
-                        # Kein Kürzel im Suffix → Register prüfen
-                        register_info = self._pruefe_register(stamm)
-                        if register_info:
-                            return register_info
+                        # Suche Kürzel im Suffix (direkt nach Stamm, ohne Leerzeichen)
+                        kuerzel = self._finde_kuerzel_im_text(suffix, position_sensitive=True)
+
+                        if kuerzel:
+                            # Kürzel gefunden!
+                            kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
+                            return {
+                                'internes_az': f"{stamm}{kuerzel_norm}",
+                                'stamm': stamm,
+                                'kuerzel': kuerzel_norm,
+                                'quelle': 'zeichen_feld_mit_kuerzel'
+                            }
+                        else:
+                            # Kein Kürzel im Suffix → Register prüfen
+                            register_info = self._pruefe_register(stamm)
+                            if register_info:
+                                return register_info
 
         return None
 
     def _suche_vollmuster(self, text: str) -> Optional[Dict]:
         """
         Sucht nach Vollmustern: \d{1,5}/\d{2}(SQ|M|MQ|TS|FÜ|CV)...
+        Unterstützt verschiedene Trennzeichen: / - .
         """
-        # Pattern: Stamm + Kürzel
-        pattern = r'\b(\d{1,5}/\d{2})(MQ|SQ|TS|CV|FÜ|FU|M)\b'
+        # Patterns für verschiedene Formate
+        patterns = [
+            r'\b(\d{1,5})[/](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)\b',  # 12345/01SQ
+            r'\b(\d{1,5})[-](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)\b',  # 12345-01SQ
+            r'\b(\d{1,5})[.](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)\b',  # 12345.01SQ
+        ]
 
-        matches = re.findall(pattern, text, re.IGNORECASE)
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                # Nehme ersten Match
+                zahl1, zahl2, kuerzel = matches[0]
+                # Normalisiere zu Slash-Format mit gepaddetem Jahr
+                stamm = f"{zahl1}/{zahl2.zfill(2)}"
+                kuerzel = kuerzel.upper()
+                kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
 
-        if matches:
-            # Nehme ersten Match
-            stamm, kuerzel = matches[0]
-            kuerzel = kuerzel.upper()
-            kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
-
-            return {
-                'internes_az': f"{stamm}{kuerzel_norm}",
-                'stamm': stamm,
-                'kuerzel': kuerzel_norm
-            }
+                return {
+                    'internes_az': f"{stamm}{kuerzel_norm}",
+                    'stamm': stamm,
+                    'kuerzel': kuerzel_norm,
+                    'quelle': 'vollmuster'
+                }
 
         return None
 
     def _suche_stamm_mit_register(self, text: str) -> Optional[Dict]:
         """
         Sucht nach Stämmen und prüft gegen Aktenregister
+        Unterstützt verschiedene Formate: / - .
         """
-        stamm_matches = re.findall(r'\b(\d{1,5}/\d{2})\b', text)
+        # Patterns für verschiedene Formate
+        patterns = [
+            r'\b(\d{1,5})[/](\d{1,2})\b',  # 12345/01
+            r'\b(\d{1,5})[-](\d{1,2})\b',  # 12345-01
+            r'\b(\d{1,5})[.](\d{1,2})\b',  # 12345.01
+        ]
 
-        for stamm in stamm_matches:
+        gefundene_staemme = set()  # Vermeide Duplikate
+
+        for pattern in patterns:
+            matches = re.findall(pattern, text)
+            for match in matches:
+                if isinstance(match, tuple):
+                    zahl1, zahl2 = match
+                    # Normalisiere zu Slash-Format mit gepaddetem Jahr
+                    stamm = f"{zahl1}/{zahl2.zfill(2)}"
+                else:
+                    stamm = match
+                gefundene_staemme.add(stamm)
+
+        # Prüfe alle gefundenen Stämme gegen Register
+        for stamm in gefundene_staemme:
             register_info = self._pruefe_register(stamm)
             if register_info:
                 return register_info

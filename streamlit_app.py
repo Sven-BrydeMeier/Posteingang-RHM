@@ -625,17 +625,30 @@ if st.button("🚀 Verarbeitung starten", type="primary", disabled=not can_proce
                             'dateiname': dateiname
                         })
 
-                        # Zeige Zuordnung mit Debug-Info
-                        debug_text = f"  → {dateiname} → SB: {sb}"
-                        if sb_aus_text:
-                            debug_text += f" (aus Text erkannt: {sb_aus_text})"
-                        elif akt_info.get('kuerzel'):
-                            debug_text += f" (aus AZ: {akt_info.get('kuerzel')})"
-                        elif 'register_data' in akt_info:
-                            debug_text += " (aus Register)"
+                        # Zeige erweiterte Debug-Info mit Aktenzeichen und Quelle
+                        debug_parts = [f"📄 Dok {i+1}/{len(dokumente)}"]
+
+                        # Aktenzeichen-Info
+                        if akt_info.get('internes_az'):
+                            az_quelle = akt_info.get('quelle', 'unbekannt')
+                            debug_parts.append(f"AZ: {akt_info['internes_az']} ({az_quelle})")
                         else:
-                            debug_text += " (nicht zugeordnet)"
-                        st.text(debug_text)
+                            debug_parts.append("AZ: nicht erkannt")
+
+                        # Sachbearbeiter-Zuordnung
+                        if sb_aus_text:
+                            debug_parts.append(f"SB: {sb} (aus Anrede/Anschrift)")
+                        elif akt_info.get('kuerzel'):
+                            debug_parts.append(f"SB: {sb} (aus AZ-Kürzel)")
+                        elif 'register_data' in akt_info:
+                            debug_parts.append(f"SB: {sb} (aus Register)")
+                        else:
+                            debug_parts.append(f"SB: {sb} (nicht zugeordnet)")
+
+                        # Dateiname
+                        debug_parts.append(f"→ {dateiname}")
+
+                        st.text(" | ".join(debug_parts))
 
                     # 4. Excel-Dateien generieren
                     status_text.text("📊 Generiere Excel-Dateien...")
