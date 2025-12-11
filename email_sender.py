@@ -50,8 +50,10 @@ class EmailSender:
         ]
     }
 
-    # Sachbearbeiter-Namen (für Email-Text)
-    SACHBEARBEITER_NAMEN = {
+    # Sachbearbeiter-Vollnamen (für Email-Text)
+    # HINWEIS: Unterscheidet sich von aktenzeichen_erkennung.SACHBEARBEITER_NAMEN
+    # (dort: Name → Kürzel für OCR-Erkennung, hier: Kürzel → Vollname für Emails)
+    SACHBEARBEITER_VOLLNAMEN = {
         'SQ': 'RA und Notar Sven-Bryde Meier',
         'TS': 'RAin Tamara Meyer',
         'M': 'RAin Ann-Kathrin Marquardsen',
@@ -105,7 +107,7 @@ class EmailSender:
             msg['To'] = reno_email
 
             # Betreff
-            sachbearbeiter_name = self.SACHBEARBEITER_NAMEN.get(sachbearbeiter, sachbearbeiter)
+            sachbearbeiter_name = self.SACHBEARBEITER_VOLLNAMEN.get(sachbearbeiter, sachbearbeiter)
             datum_str = datum or datetime.now().strftime('%d.%m.%Y')
             msg['Subject'] = f"Posteingang {sachbearbeiter} - {datum_str} ({anzahl_dokumente} Dokumente)"
 

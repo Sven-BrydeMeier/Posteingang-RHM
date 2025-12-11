@@ -362,7 +362,7 @@ if key_from_secrets:
     st.sidebar.code(masked_key)
 
     # Eingabefeld deaktiviert mit Hinweis
-    st.sidebar.text_input(
+    api_key_input = st.sidebar.text_input(
         f"{api_provider} API Key (schreibgeschützt)",
         value="Verwendet Key aus Streamlit Secrets",
         type="default",
