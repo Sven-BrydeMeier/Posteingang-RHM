@@ -3,12 +3,14 @@ Dokumentenanalyse-Modul mit Multi-API-Support
 Unterstützt: OpenAI, Claude (Anthropic), Gemini (Google)
 Extrahiert Mandant, Gegner, Datum, Stichworte, etc.
 Integriert Training-Datenbank für verbesserte Erkennung
+Erweitert mit Fristen-Erkennung und Dokumenttyp-Klassifikation
 """
 
 from typing import Dict, Optional
 import json
 import re
 from datetime import datetime
+from deadline_detector import DeadlineDetector, Priority
 
 
 class DocumentAnalyzer:
@@ -16,6 +18,9 @@ class DocumentAnalyzer:
         self.api_key = api_key
         self.api_provider = api_provider
         self.training_db = training_db  # Optional: TrainingDatabase instance
+
+        # Initialisiere Fristen-Detektor
+        self.deadline_detector = DeadlineDetector()
 
         # Initialisiere entsprechenden Client
         if api_provider == "OpenAI (ChatGPT)":
@@ -58,6 +63,10 @@ class DocumentAnalyzer:
                 training_suggestion = self._get_training_suggestion(result['gegner'])
                 if training_suggestion:
                     result['training_suggestion'] = training_suggestion
+
+            # Fristen-Erkennung
+            deadline_analysis = self.deadline_detector.analyze_document(text)
+            result['deadline_info'] = deadline_analysis
 
             return result
 

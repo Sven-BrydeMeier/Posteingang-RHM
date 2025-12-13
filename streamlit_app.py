@@ -13,9 +13,10 @@ from document_analyzer import DocumentAnalyzer
 from excel_generator import ExcelGenerator
 from storage import PersistentStorage
 from email_sender import EmailSender
+from duplicate_detector import DuplicateDetector
 
 # Versionsnummer: Zähler.JJ.MM.TT.HH.MM
-VERSION = "3.25.12.13.00.00"  # Version 3, 13. Dezember 2025, Batch-Processing
+VERSION = "4.25.12.13.01.00"  # Version 4, 13. Dezember 2025, Complete Feature Set
 
 st.set_page_config(
     page_title="RHM Posteingangsverarbeitung",
@@ -546,8 +547,37 @@ if st.button("🚀 Verarbeitung starten" if st.session_state.batch_count == 0 el
             pdf_path = temp_path / "tagespost.pdf"
             excel_path = temp_path / "aktenregister.xlsx"
 
+            # Lese PDF-Bytes einmalig
+            pdf_bytes = uploaded_pdf.read()
             with open(pdf_path, "wb") as f:
-                f.write(uploaded_pdf.read())
+                f.write(pdf_bytes)
+
+            # Duplikate-Prüfung
+            duplicate_detector = DuplicateDetector(storage.storage_dir)
+
+            # Extrahiere kurzen Text-Preview für Duplikate-Check
+            import fitz
+            try:
+                with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+                    preview_text = ""
+                    for page_num in range(min(3, len(doc))):  # Erste 3 Seiten
+                        preview_text += doc[page_num].get_text()
+
+                is_duplicate, duplicate_info = duplicate_detector.check_duplicate(pdf_bytes, preview_text)
+
+                if is_duplicate:
+                    st.warning(f"⚠️ **Duplikat erkannt!**")
+                    st.info(f"""
+                    Dieses Dokument wurde bereits verarbeitet:
+                    - **Datum**: {duplicate_info.get('timestamp', 'Unbekannt')[:19]}
+                    - **Größe**: {duplicate_info.get('size_bytes', 0) / 1024:.1f} KB
+                    - **Ähnlichkeit**: {duplicate_info.get('similarity', 1.0) * 100:.0f}%
+                    """)
+
+                    if not st.checkbox("Trotzdem verarbeiten?", key="process_duplicate"):
+                        st.stop()
+            except Exception as e:
+                st.warning(f"⚠️ Duplikate-Check fehlgeschlagen: {e}")
 
             # Progress-Container
             progress_container = st.container()
@@ -1155,6 +1185,65 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
 
             else:
                 st.success("✅ Alle Dokumente wurden automatisch zugeordnet!")
+
+        # Button zum Neu-Generieren der ZIP-Dateien nach manuellen Änderungen
+        st.markdown("---")
+        if st.button("🔄 ZIP-Dateien mit manuellen Zuordnungen neu generieren", type="secondary"):
+            with st.spinner("📦 Generiere ZIP-Dateien neu..."):
+                try:
+                    # Verwende aktualisierte alle_daten (mit manuellen Zuordnungen)
+                    alle_daten = st.session_state.alle_daten
+
+                    # Aktualisiere Sachbearbeiter-Statistiken
+                    sachbearbeiter_stats_neu = {"SQ": 0, "TS": 0, "M": 0, "FÜ": 0, "CV": 0, "nicht-zugeordnet": 0}
+                    for daten in alle_daten:
+                        sb = daten['sachbearbeiter']
+                        sachbearbeiter_stats_neu[sb] = sachbearbeiter_stats_neu.get(sb, 0) + 1
+
+                    # Erstelle temporäres Verzeichnis für Excel-Generierung
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        temp_path = Path(temp_dir)
+
+                        # Excel-Dateien generieren
+                        excel_gen = ExcelGenerator()
+                        excel_dateien = excel_gen.erstelle_excel_dateien(alle_daten, temp_path)
+
+                        # ZIP-Dateien erstellen
+                        zip_dateien = {}
+
+                        for sb in ["SQ", "TS", "M", "FÜ", "CV", "nicht-zugeordnet"]:
+                            if sachbearbeiter_stats_neu.get(sb, 0) > 0:
+                                zip_buffer = BytesIO()
+                                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                                    # PDFs hinzufügen
+                                    for daten in alle_daten:
+                                        if daten['sachbearbeiter'] == sb:
+                                            pdf_content = daten['dokument']['pdf_bytes']
+                                            zipf.writestr(daten['dateiname'], pdf_content)
+
+                                    # Excel hinzufügen
+                                    if sb in excel_dateien:
+                                        excel_bytes = excel_dateien[sb]
+                                        zipf.writestr(f"{sb}_Fristen.xlsx", excel_bytes)
+
+                                zip_dateien[sb] = zip_buffer.getvalue()
+
+                        # Gesamt-Excel
+                        gesamt_excel = excel_gen.erstelle_gesamt_excel(alle_daten)
+
+                        # Update Ergebnisse
+                        st.session_state.verarbeitung_ergebnisse = {
+                            'zip_dateien': dict(zip_dateien),
+                            'gesamt_excel': bytes(gesamt_excel),
+                            'sachbearbeiter_stats': dict(sachbearbeiter_stats_neu)
+                        }
+
+                        st.success("✅ ZIP-Dateien erfolgreich neu generiert! Bitte scrollen Sie nach oben zu den Downloads.")
+                        st.rerun()
+
+                except Exception as e:
+                    st.error(f"❌ Fehler beim Neu-Generieren: {str(e)}")
+                    st.exception(e)
 
         # Button zum Löschen der Ergebnisse und Neustart
         if st.button("🔄 Neue Verarbeitung starten (alle Daten löschen)"):

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import re
+import json
 
 
 class TrainingDatabase:
@@ -326,3 +327,114 @@ class TrainingDatabase:
             df = df[df['sachbearbeiter'] == sachbearbeiter]
 
         return df.sort_values('timestamp', ascending=False).head(limit)
+
+    def export_to_json(self, output_path: str) -> bool:
+        """
+        Exportiert Training-Datenbank nach JSON
+
+        Args:
+            output_path: Pfad zur JSON-Datei
+
+        Returns:
+            True bei Erfolg
+        """
+        try:
+            export_data = {
+                'export_date': datetime.now().isoformat(),
+                'version': '1.0',
+                'training_data': [],
+                'absender_patterns': []
+            }
+
+            # Training Data
+            if self.db_file.exists():
+                df = pd.read_excel(self.db_file)
+                export_data['training_data'] = df.to_dict('records')
+
+            # Absender Patterns
+            if self.absender_file.exists():
+                df = pd.read_excel(self.absender_file)
+                export_data['absender_patterns'] = df.to_dict('records')
+
+            # Schreibe JSON
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, ensure_ascii=False, indent=2)
+
+            return True
+
+        except Exception as e:
+            print(f"Export-Fehler: {e}")
+            return False
+
+    def import_from_json(self, input_path: str, merge: bool = True) -> bool:
+        """
+        Importiert Training-Datenbank aus JSON
+
+        Args:
+            input_path: Pfad zur JSON-Datei
+            merge: True = mit vorhandenen Daten mergen, False = überschreiben
+
+        Returns:
+            True bei Erfolg
+        """
+        try:
+            # Lese JSON
+            with open(input_path, 'r', encoding='utf-8') as f:
+                import_data = json.load(f)
+
+            # Training Data importieren
+            if import_data.get('training_data'):
+                new_df = pd.DataFrame(import_data['training_data'])
+
+                if merge and self.db_file.exists():
+                    # Merge mit vorhandenen Daten
+                    existing_df = pd.read_excel(self.db_file)
+                    combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+                    # Entferne Duplikate basierend auf Absender + Aktenzeichen
+                    combined_df = combined_df.drop_duplicates(
+                        subset=['absender_normalisiert', 'aktenzeichen'],
+                        keep='last'
+                    )
+                    combined_df.to_excel(self.db_file, index=False)
+                else:
+                    new_df.to_excel(self.db_file, index=False)
+
+            # Absender Patterns importieren
+            if import_data.get('absender_patterns'):
+                new_df = pd.DataFrame(import_data['absender_patterns'])
+
+                if merge and self.absender_file.exists():
+                    existing_df = pd.read_excel(self.absender_file)
+                    combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+                    # Gruppiere und aktualisiere Häufigkeiten
+                    combined_df = combined_df.groupby(['absender_normalisiert', 'sachbearbeiter']).agg({
+                        'haeufigkeit': 'sum',
+                        'letztes_vorkommen': 'max',
+                        'pattern': 'first'
+                    }).reset_index()
+                    combined_df.to_excel(self.absender_file, index=False)
+                else:
+                    new_df.to_excel(self.absender_file, index=False)
+
+            return True
+
+        except Exception as e:
+            print(f"Import-Fehler: {e}")
+            return False
+
+    def clear_all_data(self) -> bool:
+        """
+        Löscht alle Training-Daten (mit Bestätigung!)
+
+        Returns:
+            True bei Erfolg
+        """
+        try:
+            if self.db_file.exists():
+                self.db_file.unlink()
+            if self.absender_file.exists():
+                self.absender_file.unlink()
+            return True
+        except Exception as e:
+            print(f"Fehler beim Löschen: {e}")
+            return False
