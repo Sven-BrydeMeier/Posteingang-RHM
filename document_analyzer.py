@@ -2,6 +2,7 @@
 Dokumentenanalyse-Modul mit Multi-API-Support
 Unterstützt: OpenAI, Claude (Anthropic), Gemini (Google)
 Extrahiert Mandant, Gegner, Datum, Stichworte, etc.
+Integriert Training-Datenbank für verbesserte Erkennung
 """
 
 from typing import Dict, Optional
@@ -11,9 +12,10 @@ from datetime import datetime
 
 
 class DocumentAnalyzer:
-    def __init__(self, api_key: str, api_provider: str = "OpenAI (ChatGPT)"):
+    def __init__(self, api_key: str, api_provider: str = "OpenAI (ChatGPT)", training_db=None):
         self.api_key = api_key
         self.api_provider = api_provider
+        self.training_db = training_db  # Optional: TrainingDatabase instance
 
         # Initialisiere entsprechenden Client
         if api_provider == "OpenAI (ChatGPT)":
@@ -36,6 +38,8 @@ class DocumentAnalyzer:
         - 3-5 Stichworte
         - Absendertyp (Gericht, Behörde, Versicherung, Sonstige)
         - Fristen (falls vorhanden)
+
+        Nutzt Training-Datenbank für verbesserte Sachbearbeiter-Erkennung
         """
         # Begrenze Text auf erste 4000 Zeichen (API-Kosten sparen)
         text_gekuerzt = text[:4000]
@@ -43,14 +47,43 @@ class DocumentAnalyzer:
         try:
             # Route zu entsprechendem API-Provider
             if self.api_provider == "OpenAI (ChatGPT)":
-                return self._analysiere_mit_openai(text_gekuerzt, akt_info, text)
+                result = self._analysiere_mit_openai(text_gekuerzt, akt_info, text)
             elif self.api_provider == "Claude (Anthropic)":
-                return self._analysiere_mit_claude(text_gekuerzt, akt_info, text)
+                result = self._analysiere_mit_claude(text_gekuerzt, akt_info, text)
             elif self.api_provider == "Gemini (Google)":
-                return self._analysiere_mit_gemini(text_gekuerzt, akt_info, text)
+                result = self._analysiere_mit_gemini(text_gekuerzt, akt_info, text)
+
+            # Prüfe Training-Datenbank für Sachbearbeiter-Vorschlag
+            if self.training_db and result.get('gegner'):
+                training_suggestion = self._get_training_suggestion(result['gegner'])
+                if training_suggestion:
+                    result['training_suggestion'] = training_suggestion
+
+            return result
+
         except Exception as e:
             # Fallback bei Fehler: Versuche manuelle Extraktion
             return self._fallback_analyse(text)
+
+    def _get_training_suggestion(self, absender: str) -> Optional[Dict]:
+        """
+        Prüft Training-Datenbank für Absender-Match
+
+        Returns:
+            Dict mit 'sachbearbeiter' und 'confidence' oder None
+        """
+        if not self.training_db:
+            return None
+
+        pattern = self.training_db.find_matching_pattern(absender)
+        if pattern:
+            return {
+                'sachbearbeiter': pattern['sachbearbeiter'],
+                'haeufigkeit': pattern['haeufigkeit'],
+                'fuzzy_match': pattern.get('fuzzy_match', False)
+            }
+
+        return None
 
     def _analysiere_mit_openai(self, text_gekuerzt: str, akt_info: Dict, volltext: str) -> Dict:
         """Analyse mit OpenAI GPT"""

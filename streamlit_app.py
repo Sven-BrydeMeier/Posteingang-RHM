@@ -15,7 +15,7 @@ from storage import PersistentStorage
 from email_sender import EmailSender
 
 # Versionsnummer: Zähler.JJ.MM.TT.HH.MM
-VERSION = "2.25.12.09.17.00"  # Version 2, 09. Dezember 2025, 17:00 Uhr
+VERSION = "3.25.12.13.00.00"  # Version 3, 13. Dezember 2025, Batch-Processing
 
 st.set_page_config(
     page_title="RHM Posteingangsverarbeitung",
@@ -194,6 +194,16 @@ if 'storage' not in st.session_state:
     st.session_state.storage = PersistentStorage()
 
 storage = st.session_state.storage
+
+# Initialisiere Batch-Processing Session State
+if 'accumulated_documents' not in st.session_state:
+    st.session_state.accumulated_documents = []
+if 'batch_count' not in st.session_state:
+    st.session_state.batch_count = 0
+if 'batch_mode_active' not in st.session_state:
+    st.session_state.batch_mode_active = False
+if 'sachbearbeiter_stats_accumulated' not in st.session_state:
+    st.session_state.sachbearbeiter_stats_accumulated = {"SQ": 0, "TS": 0, "M": 0, "FÜ": 0, "CV": 0, "nicht-zugeordnet": 0}
 
 # Lade gespeicherte API Keys beim ersten Laden
 if 'api_keys' not in st.session_state:
@@ -507,9 +517,22 @@ with col2:
 
 st.markdown("---")
 
+# Zeige Batch-Status wenn im Batch-Modus
+if st.session_state.batch_mode_active and st.session_state.batch_count > 0:
+    st.info(f"📦 **Batch-Modus aktiv** | {st.session_state.batch_count} Batch(es) verarbeitet | "
+            f"{len(st.session_state.accumulated_documents)} Dokumente gesammelt")
+
+    # Zeige akkumulierte Statistiken
+    col_stats = st.columns(6)
+    for idx, (sb, count) in enumerate(st.session_state.sachbearbeiter_stats_accumulated.items()):
+        if count > 0:
+            with col_stats[idx]:
+                st.metric(sb, count, delta=None)
+
 # Verarbeitungsbutton (Excel ist optional wenn gespeichert)
 can_process = uploaded_pdf and current_api_key and (uploaded_excel or storage.has_aktenregister())
-if st.button("🚀 Verarbeitung starten", type="primary", disabled=not can_process):
+if st.button("🚀 Verarbeitung starten" if st.session_state.batch_count == 0 else "📄 Weiteren Batch verarbeiten",
+             type="primary", disabled=not can_process):
     if not current_api_key:
         st.error(f"❌ Bitte geben Sie Ihren {api_provider} API-Key ein!")
     elif not uploaded_pdf:
@@ -585,7 +608,11 @@ if st.button("🚀 Verarbeitung starten", type="primary", disabled=not can_proce
                     # 3. Dokumente analysieren mit KI
                     status_text.text(f"🤖 Analysiere Dokumente mit {api_provider}...")
                     progress_bar.progress(40)
-                    analyzer = DocumentAnalyzer(current_api_key, api_provider=api_provider)
+
+                    # Initialisiere Training-Database für KI-gestützte Erkennung
+                    from training_database import TrainingDatabase
+                    training_db = TrainingDatabase(storage.storage_dir)
+                    analyzer = DocumentAnalyzer(current_api_key, api_provider=api_provider, training_db=training_db)
 
                     alle_daten = []
                     sachbearbeiter_stats = {"SQ": 0, "TS": 0, "M": 0, "FÜ": 0, "CV": 0, "nicht-zugeordnet": 0}
@@ -600,11 +627,19 @@ if st.button("🚀 Verarbeitung starten", type="primary", disabled=not can_proce
                         # Sachbearbeiter aus Text erkennen (Anrede/Anschrift)
                         sb_aus_text = erkenner.erkenne_sachbearbeiter_aus_text(doc['text'])
 
-                        # Dokumenteninhalt analysieren
+                        # Dokumenteninhalt analysieren (inkl. Training-DB Vorschläge)
                         analyse = analyzer.analysiere_dokument(doc['text'], akt_info)
 
+                        # Prüfe Training-Suggestion als zusätzliche Priorität
+                        training_sb = None
+                        if 'training_suggestion' in analyse and not sb_aus_text and not akt_info.get('kuerzel'):
+                            # Training-Vorschlag nur nutzen wenn keine anderen Quellen vorhanden
+                            suggestion = analyse['training_suggestion']
+                            if suggestion['haeufigkeit'] >= 2:  # Min. 2x zuvor gesehen
+                                training_sb = suggestion['sachbearbeiter']
+
                         # Sachbearbeiter zuordnen (mit Priorität für Text-Erkennung)
-                        sb = erkenner.ermittle_sachbearbeiter(akt_info, analyse, sachbearbeiter_aus_text=sb_aus_text)
+                        sb = erkenner.ermittle_sachbearbeiter(akt_info, analyse, sachbearbeiter_aus_text=sb_aus_text or training_sb)
                         sachbearbeiter_stats[sb] = sachbearbeiter_stats.get(sb, 0) + 1
 
                         # Dateiname generieren
@@ -636,66 +671,125 @@ if st.button("🚀 Verarbeitung starten", type="primary", disabled=not can_proce
                             debug_parts.append("AZ: nicht erkannt")
 
                         # Sachbearbeiter-Zuordnung
-                        if sb_aus_text:
+                        if training_sb:
+                            suggestion = analyse.get('training_suggestion', {})
+                            fuzzy = " (ähnlich)" if suggestion.get('fuzzy_match') else ""
+                            debug_parts.append(f"SB: {sb} (aus Training-DB{fuzzy}, {suggestion.get('haeufigkeit', 0)}x)")
+                        elif sb_aus_text:
                             debug_parts.append(f"SB: {sb} (aus Anrede/Anschrift)")
                         elif akt_info.get('kuerzel'):
                             debug_parts.append(f"SB: {sb} (aus AZ-Kürzel)")
                         elif 'register_data' in akt_info:
                             debug_parts.append(f"SB: {sb} (aus Register)")
                         else:
-                            debug_parts.append(f"SB: {sb} (nicht zugeordnet)")
+                            # Zeige Training-Suggestion wenn vorhanden, aber nicht genutzt
+                            if 'training_suggestion' in analyse:
+                                suggestion = analyse['training_suggestion']
+                                debug_parts.append(f"SB: {sb} (nicht zugeordnet, Training-Vorschlag: {suggestion['sachbearbeiter']} ({suggestion['haeufigkeit']}x))")
+                            else:
+                                debug_parts.append(f"SB: {sb} (nicht zugeordnet)")
 
                         # Dateiname
                         debug_parts.append(f"→ {dateiname}")
 
                         st.text(" | ".join(debug_parts))
 
-                    # 4. Excel-Dateien generieren
-                    status_text.text("📊 Generiere Excel-Dateien...")
-                    progress_bar.progress(85)
-                    excel_gen = ExcelGenerator()
-                    excel_dateien = excel_gen.erstelle_excel_dateien(alle_daten, temp_path)
-
-                    # 5. ZIP-Dateien erstellen
-                    status_text.text("📦 Erstelle ZIP-Dateien...")
-                    progress_bar.progress(90)
-                    zip_dateien = {}
-
-                    for sb in ["SQ", "TS", "M", "FÜ", "CV", "nicht-zugeordnet"]:
-                        if sachbearbeiter_stats.get(sb, 0) > 0:
-                            zip_buffer = BytesIO()
-                            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                                # PDFs hinzufügen
-                                for daten in alle_daten:
-                                    if daten['sachbearbeiter'] == sb:
-                                        pdf_content = daten['dokument']['pdf_bytes']
-                                        zipf.writestr(daten['dateiname'], pdf_content)
-
-                                # Excel hinzufügen
-                                if sb in excel_dateien:
-                                    excel_bytes = excel_dateien[sb]
-                                    zipf.writestr(f"{sb}_Fristen.xlsx", excel_bytes)
-
-                            zip_dateien[sb] = zip_buffer.getvalue()
-
-                    # Gesamt-Excel
-                    gesamt_excel = excel_gen.erstelle_gesamt_excel(alle_daten)
-
                     progress_bar.progress(100)
-                    status_text.text("✅ Verarbeitung abgeschlossen!")
+                    status_text.text("✅ Batch-Verarbeitung abgeschlossen!")
 
-                    # Speichere Ergebnisse in Session State für persistente Download-Buttons
-                    # WICHTIG: Alle Daten müssen kopiert werden, nicht nur Referenzen
-                    st.session_state.verarbeitung_ergebnisse = {
-                        'zip_dateien': dict(zip_dateien),  # Explizite Kopie
-                        'gesamt_excel': bytes(gesamt_excel),  # Explizite Kopie
-                        'sachbearbeiter_stats': dict(sachbearbeiter_stats)  # Explizite Kopie
-                    }
-                    st.session_state.alle_daten = alle_daten  # Für manuelle Nachbearbeitung
-                    st.session_state.verarbeitung_abgeschlossen = True  # Flag setzen
+                    # Füge Dokumente zu akkumulierten Daten hinzu
+                    st.session_state.accumulated_documents.extend(alle_daten)
+
+                    # Aktualisiere akkumulierte Statistiken
+                    for sb, count in sachbearbeiter_stats.items():
+                        st.session_state.sachbearbeiter_stats_accumulated[sb] = \
+                            st.session_state.sachbearbeiter_stats_accumulated.get(sb, 0) + count
+
+                    # Batch-Counter erhöhen
+                    st.session_state.batch_count += 1
+                    st.session_state.batch_mode_active = True
+
+                    # Speichere alle Daten für Zugriff
+                    st.session_state.alle_daten = list(st.session_state.accumulated_documents)
+
+                    # Zeige Batch-Info
+                    st.success(f"✅ Batch #{st.session_state.batch_count} verarbeitet: {len(alle_daten)} Dokumente")
+                    st.info(f"📊 **Gesamt akkumuliert**: {len(st.session_state.accumulated_documents)} Dokumente aus {st.session_state.batch_count} Batch(es)")
+
+                    # Setze Flag dass Batch verarbeitet wurde (NICHT finale Verarbeitung)
+                    st.session_state.batch_verarbeitet = True
 
                 except Exception as e:
                     st.error(f"❌ Fehler bei der Verarbeitung: {str(e)}")
+                    st.exception(e)
+
+# Zeige Batch-Aktionen wenn Batch verarbeitet wurde
+if st.session_state.get('batch_verarbeitet', False):
+    st.markdown("---")
+    st.subheader("📦 Nächster Schritt")
+
+    col_btn1, col_btn2 = st.columns(2, gap="medium")
+
+    with col_btn1:
+        if st.button("📄 Weitere Datei einlesen und hinzufügen", type="secondary", use_container_width=True):
+            # Lösche nur Upload-bezogene Session States, behalte akkumulierte Daten
+            st.session_state.batch_verarbeitet = False
+            # File uploader wird automatisch zurückgesetzt durch rerun
+            st.rerun()
+
+    with col_btn2:
+        if st.button("📦 Postscan beenden und ZIP-Dateien erstellen", type="primary", use_container_width=True):
+            # Starte finale Verarbeitung
+            with st.spinner("📦 Erstelle finale ZIP-Dateien aus allen Batches..."):
+                try:
+                    # Verwende akkumulierte Dokumente
+                    alle_daten = st.session_state.accumulated_documents
+
+                    # Erstelle temporäres Verzeichnis für Excel-Generierung
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        temp_path = Path(temp_dir)
+
+                        # Excel-Dateien generieren
+                        excel_gen = ExcelGenerator()
+                        excel_dateien = excel_gen.erstelle_excel_dateien(alle_daten, temp_path)
+
+                        # ZIP-Dateien erstellen
+                        zip_dateien = {}
+
+                        for sb in ["SQ", "TS", "M", "FÜ", "CV", "nicht-zugeordnet"]:
+                            if st.session_state.sachbearbeiter_stats_accumulated.get(sb, 0) > 0:
+                                zip_buffer = BytesIO()
+                                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                                    # PDFs hinzufügen
+                                    for daten in alle_daten:
+                                        if daten['sachbearbeiter'] == sb:
+                                            pdf_content = daten['dokument']['pdf_bytes']
+                                            zipf.writestr(daten['dateiname'], pdf_content)
+
+                                    # Excel hinzufügen
+                                    if sb in excel_dateien:
+                                        excel_bytes = excel_dateien[sb]
+                                        zipf.writestr(f"{sb}_Fristen.xlsx", excel_bytes)
+
+                                zip_dateien[sb] = zip_buffer.getvalue()
+
+                        # Gesamt-Excel
+                        gesamt_excel = excel_gen.erstelle_gesamt_excel(alle_daten)
+
+                        # Speichere Ergebnisse
+                        st.session_state.verarbeitung_ergebnisse = {
+                            'zip_dateien': dict(zip_dateien),
+                            'gesamt_excel': bytes(gesamt_excel),
+                            'sachbearbeiter_stats': dict(st.session_state.sachbearbeiter_stats_accumulated)
+                        }
+                        st.session_state.verarbeitung_abgeschlossen = True
+                        st.session_state.batch_verarbeitet = False
+
+                        st.success(f"✅ {st.session_state.batch_count} Batch(es) mit {len(alle_daten)} Dokumenten finalisiert!")
+                        st.rerun()
+
+                except Exception as e:
+                    st.error(f"❌ Fehler beim Erstellen der ZIP-Dateien: {str(e)}")
                     st.exception(e)
 
 # Zeige Download-Buttons außerhalb des Processing-Blocks (persistent)
@@ -1062,12 +1156,30 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
             else:
                 st.success("✅ Alle Dokumente wurden automatisch zugeordnet!")
 
-        # Button zum Löschen der Ergebnisse
-        if st.button("🗑️ Ergebnisse löschen und neu verarbeiten"):
-            if 'verarbeitung_ergebnisse' in st.session_state:
-                del st.session_state.verarbeitung_ergebnisse
-            if 'verarbeitung_abgeschlossen' in st.session_state:
-                del st.session_state.verarbeitung_abgeschlossen
+        # Button zum Löschen der Ergebnisse und Neustart
+        if st.button("🔄 Neue Verarbeitung starten (alle Daten löschen)"):
+            # Lösche alle Verarbeitungs- und Batch-Daten
+            keys_to_delete = [
+                'verarbeitung_ergebnisse',
+                'verarbeitung_abgeschlossen',
+                'accumulated_documents',
+                'batch_count',
+                'batch_mode_active',
+                'sachbearbeiter_stats_accumulated',
+                'batch_verarbeitet',
+                'alle_daten',
+                'current_manual_doc_index'
+            ]
+            for key in keys_to_delete:
+                if key in st.session_state:
+                    del st.session_state[key]
+
+            # Initialisiere Batch-Variablen neu
+            st.session_state.accumulated_documents = []
+            st.session_state.batch_count = 0
+            st.session_state.batch_mode_active = False
+            st.session_state.sachbearbeiter_stats_accumulated = {"SQ": 0, "TS": 0, "M": 0, "FÜ": 0, "CV": 0, "nicht-zugeordnet": 0}
+
             st.rerun()
 
 # Info-Box
@@ -1076,11 +1188,22 @@ with st.expander("ℹ️ Anleitung"):
     st.markdown("""
     ### So funktioniert die App:
 
-    1. **OpenAI API Key eingeben** (links in der Sidebar)
+    1. **API Key eingeben** (OpenAI, Claude oder Gemini)
     2. **Tagespost-PDF hochladen** (OCR-Version)
     3. **Aktenregister-Excel hochladen** (aktenregister.xlsx)
     4. **"Verarbeitung starten" klicken**
-    5. **ZIP-Dateien herunterladen** (eine pro Sachbearbeiter)
+    5. **Batch-Modus nutzen** (optional):
+       - **"Weitere Datei einlesen"** → Nächstes PDF-Paket hinzufügen
+       - **"Postscan beenden"** → Alle Batches zu ZIP-Dateien packen
+    6. **ZIP-Dateien herunterladen** (eine pro Sachbearbeiter)
+
+    ### Batch-Processing (NEU):
+    Sie können mehrere Post-Pakete nacheinander einscannen:
+    - 1. PDF hochladen und verarbeiten
+    - **"Weitere Datei einlesen"** klicken
+    - 2. PDF hochladen und verarbeiten
+    - Beliebig wiederholen...
+    - **"Postscan beenden"** → Alle Dokumente werden zusammen gepackt
 
     ### Die App erstellt:
     - ZIP-Dateien pro Sachbearbeiter (SQ, TS, M, FÜ, CV, nicht-zugeordnet)
@@ -1093,4 +1216,5 @@ with st.expander("ℹ️ Anleitung"):
     - "Ihr Zeichen" / "Unser Zeichen" - Felder haben höchste Priorität
     - Externe Aktenzeichen (Gerichte, Versicherungen)
     - Automatische Zuordnung über Aktenregister
+    - **KI-gestütztes Lernen** aus manuellen Zuordnungen
     """)
