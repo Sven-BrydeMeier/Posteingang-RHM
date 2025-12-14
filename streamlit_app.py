@@ -15,9 +15,10 @@ from storage import PersistentStorage
 from email_sender import EmailSender
 from duplicate_detector import DuplicateDetector
 from kanzleisoftware_sync import KanzleiSoftwareSync
+from trash_manager import TrashManager
 
 # Versionsnummer: Zähler.JJ.MM.TT.HH.MM
-VERSION = "5.25.12.13.02.00"  # Version 5, 13. Dezember 2025, Kanzleisoftware-Integration
+VERSION = "6.25.12.13.03.00"  # Version 6, 13. Dezember 2025, Papierkorb-System
 
 st.set_page_config(
     page_title="RHM Posteingangsverarbeitung",
@@ -196,6 +197,16 @@ if 'storage' not in st.session_state:
     st.session_state.storage = PersistentStorage()
 
 storage = st.session_state.storage
+
+# Initialisiere Trash-Manager
+if 'trash_manager' not in st.session_state:
+    st.session_state.trash_manager = TrashManager(storage.storage_dir)
+    # Automatisches Cleanup beim Start
+    deleted_count = st.session_state.trash_manager.cleanup_expired()
+    if deleted_count > 0:
+        print(f"Trash: {deleted_count} abgelaufene Dokumente automatisch gelöscht")
+
+trash_manager = st.session_state.trash_manager
 
 # Initialisiere Batch-Processing Session State
 if 'accumulated_documents' not in st.session_state:
@@ -481,6 +492,59 @@ st.sidebar.info("""
 - FÜ: Rechtsanwalt Dr. Fürsen
 - CV: Rechtsanwalt Christian Ostertun
 """)
+
+# Papierkorb-Einstellungen
+st.sidebar.markdown("---")
+st.sidebar.subheader("🗑️ Papierkorb")
+
+# Statistiken
+trash_stats = trash_manager.get_statistics()
+if trash_stats['total_items'] > 0:
+    st.sidebar.warning(f"📦 {trash_stats['total_items']} Dokument(e) im Papierkorb")
+
+    # Zeige abgelaufene Dokumente
+    if trash_stats['expired_items'] > 0:
+        st.sidebar.error(f"⚠️ {trash_stats['expired_items']} abgelaufen")
+else:
+    st.sidebar.success("✅ Papierkorb leer")
+
+# Aufbewahrungszeit einstellen
+with st.sidebar.expander("⚙️ Einstellungen"):
+    current_hours = trash_manager.get_retention_hours()
+
+    retention_hours = st.number_input(
+        "Aufbewahrungszeit (Stunden):",
+        min_value=1,
+        max_value=720,  # 30 Tage
+        value=current_hours,
+        step=1,
+        help="Dokumente werden nach dieser Zeit automatisch gelöscht"
+    )
+
+    if retention_hours != current_hours:
+        trash_manager.set_retention_hours(retention_hours)
+        st.success(f"✅ Aufbewahrungszeit auf {retention_hours}h gesetzt")
+
+    # Schnell-Auswahl
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("24h", use_container_width=True):
+            trash_manager.set_retention_hours(24)
+            st.rerun()
+    with col2:
+        if st.button("48h", use_container_width=True):
+            trash_manager.set_retention_hours(48)
+            st.rerun()
+
+    col3, col4 = st.columns(2)
+    with col3:
+        if st.button("7 Tage", use_container_width=True):
+            trash_manager.set_retention_hours(168)
+            st.rerun()
+    with col4:
+        if st.button("30 Tage", use_container_width=True):
+            trash_manager.set_retention_hours(720)
+            st.rerun()
 
 # Haupt-Upload-Bereich (responsive: 1 Spalte auf Mobile, 2 auf Desktop)
 col1, col2 = st.columns([1, 1], gap="medium")
@@ -1415,6 +1479,135 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
             st.session_state.sachbearbeiter_stats_accumulated = {"SQ": 0, "TS": 0, "M": 0, "FÜ": 0, "CV": 0, "nicht-zugeordnet": 0}
 
             st.rerun()
+
+# === PAPIERKORB-VERWALTUNG ===
+st.markdown("---")
+st.subheader("🗑️ Papierkorb")
+
+trash_items = trash_manager.get_trash_items()
+
+if trash_items:
+    st.warning(f"📦 {len(trash_items)} Dokument(e) im Papierkorb")
+
+    # Warnung bei bald ablaufenden Dokumenten
+    expiring_soon = trash_manager.get_expiring_soon(hours=6)
+    if expiring_soon:
+        st.error(f"⚠️ {len(expiring_soon)} Dokument(e) werden in den nächsten 6 Stunden gelöscht!")
+
+    with st.expander("📋 Papierkorb anzeigen", expanded=False):
+        # Statistiken
+        col_stat1, col_stat2, col_stat3 = st.columns(3)
+
+        with col_stat1:
+            st.metric("Dokumente", len(trash_items))
+        with col_stat2:
+            st.metric("Größe", f"{trash_stats['total_size_mb']:.2f} MB")
+        with col_stat3:
+            st.metric("Aufbewahrung", f"{trash_stats['retention_hours']}h")
+
+        # Such-Funktion
+        search_query = st.text_input("🔍 Suche im Papierkorb", placeholder="Dateiname...")
+
+        if search_query:
+            trash_items = trash_manager.search_trash(search_query)
+            st.info(f"📊 {len(trash_items)} Ergebnis(se) gefunden")
+
+        # Liste der Dokumente
+        for item in trash_items:
+            with st.container():
+                col_info, col_actions = st.columns([3, 1])
+
+                with col_info:
+                    # Status-Icon
+                    if item['is_expired']:
+                        status_icon = "🔴"
+                        status_text = "Abgelaufen"
+                    elif item['hours_remaining'] <= 6:
+                        status_icon = "🟠"
+                        status_text = f"Noch {item['hours_remaining']:.1f}h"
+                    else:
+                        status_icon = "🟢"
+                        status_text = f"Noch {item['hours_remaining']:.1f}h"
+
+                    st.markdown(f"""
+                    {status_icon} **{item['name']}**
+                    Gelöscht: {item['deleted_at']} | Läuft ab: {item['expires_at']} | {item['size_kb']:.1f} KB
+                    Original: `{item['original_path']}`
+                    {status_text}
+                    """)
+
+                with col_actions:
+                    # Wiederherstellen
+                    if st.button("♻️ Wiederherstellen", key=f"restore_{item['trash_id']}", use_container_width=True):
+                        try:
+                            trash_manager.restore_from_trash(item['trash_id'])
+                            st.success(f"✅ '{item['name']}' wiederhergestellt!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Fehler: {e}")
+
+                    # Endgültig löschen
+                    if st.button("🗑️ Löschen", key=f"delete_{item['trash_id']}", use_container_width=True):
+                        if trash_manager.permanent_delete(item['trash_id']):
+                            st.success(f"✅ '{item['name']}' endgültig gelöscht!")
+                            st.rerun()
+
+                    # Verlängern
+                    if st.button("⏰ +24h", key=f"extend_{item['trash_id']}", use_container_width=True):
+                        if trash_manager.extend_retention(item['trash_id'], 24):
+                            st.success(f"✅ Aufbewahrung verlängert!")
+                            st.rerun()
+
+                st.markdown("---")
+
+        # Massen-Aktionen
+        st.markdown("### 🔧 Massen-Aktionen")
+
+        col_mass1, col_mass2, col_mass3 = st.columns(3)
+
+        with col_mass1:
+            if st.button("♻️ Alles wiederherstellen", type="secondary", use_container_width=True):
+                restored_count = 0
+                for item in trash_items:
+                    try:
+                        trash_manager.restore_from_trash(item['trash_id'])
+                        restored_count += 1
+                    except:
+                        pass
+                st.success(f"✅ {restored_count} Dokument(e) wiederhergestellt!")
+                st.rerun()
+
+        with col_mass2:
+            if st.button("🗑️ Papierkorb leeren", type="secondary", use_container_width=True):
+                deleted_count = trash_manager.empty_trash()
+                st.success(f"✅ {deleted_count} Dokument(e) endgültig gelöscht!")
+                st.rerun()
+
+        with col_mass3:
+            if st.button("🧹 Nur Abgelaufene löschen", type="secondary", use_container_width=True):
+                deleted_count = trash_manager.cleanup_expired()
+                st.success(f"✅ {deleted_count} abgelaufene Dokument(e) gelöscht!")
+                st.rerun()
+
+        # Export-Funktion
+        st.markdown("### 📥 Export")
+        if st.button("📊 Papierkorb-Liste als Excel exportieren"):
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+                trash_manager.export_trash_list(Path(tmp.name))
+
+                with open(tmp.name, 'rb') as f:
+                    excel_bytes = f.read()
+
+                st.download_button(
+                    label="💾 Excel herunterladen",
+                    data=excel_bytes,
+                    file_name=f"Papierkorb_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
+else:
+    st.success("✅ Papierkorb ist leer")
 
 # Info-Box
 st.markdown("---")
