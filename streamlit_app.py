@@ -14,9 +14,10 @@ from excel_generator import ExcelGenerator
 from storage import PersistentStorage
 from email_sender import EmailSender
 from duplicate_detector import DuplicateDetector
+from kanzleisoftware_sync import KanzleiSoftwareSync
 
 # Versionsnummer: Zähler.JJ.MM.TT.HH.MM
-VERSION = "4.25.12.13.01.00"  # Version 4, 13. Dezember 2025, Complete Feature Set
+VERSION = "5.25.12.13.02.00"  # Version 5, 13. Dezember 2025, Kanzleisoftware-Integration
 
 st.set_page_config(
     page_title="RHM Posteingangsverarbeitung",
@@ -516,6 +517,63 @@ with col2:
         key="excel_uploader"
     )
 
+    # Kanzleisoftware-Integration
+    with st.expander("🔄 Kanzleisoftware-Import (RA-MICRO / DATEV)"):
+        st.info("**Importieren Sie Ihr Aktenregister direkt aus RA-MICRO oder DATEV**")
+
+        sync_manager = KanzleiSoftwareSync(storage.storage_dir)
+
+        # Template Download
+        if st.button("📥 Mapping-Template herunterladen"):
+            template_bytes = sync_manager.create_mapping_template()
+            st.download_button(
+                label="💾 Template speichern",
+                data=template_bytes,
+                file_name="kanzleisoftware_mapping_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        # Import aus Kanzleisoftware
+        kanzlei_import = st.file_uploader(
+            "Excel-Export aus RA-MICRO/DATEV",
+            type=["xlsx"],
+            help="Automatische Format-Erkennung",
+            key="kanzlei_import"
+        )
+
+        if kanzlei_import:
+            try:
+                # Automatischer Import mit Format-Erkennung
+                rhm_df, detected_format = sync_manager.import_auto(BytesIO(kanzlei_import.read()))
+
+                st.success(f"✅ Format erkannt: **{detected_format}**")
+                st.info(f"📊 {len(rhm_df)} Akten importiert")
+
+                # Validierung
+                validation = sync_manager.validate_import(rhm_df)
+
+                if validation['warnings']:
+                    for warning in validation['warnings']:
+                        st.warning(f"⚠️ {warning}")
+
+                if validation['errors']:
+                    for error in validation['errors']:
+                        st.error(f"❌ {error}")
+
+                # Vorschau
+                with st.expander("👁️ Daten-Vorschau"):
+                    st.dataframe(rhm_df.head(10))
+
+                # Import-Button
+                if st.button("✅ Als Aktenregister übernehmen", type="primary"):
+                    # Speichere als Aktenregister
+                    merged_df = storage.save_aktenregister(rhm_df, merge=storage.has_aktenregister())
+                    st.success(f"✅ {len(merged_df)} Akten im Register gespeichert!")
+                    st.rerun()
+
+            except Exception as e:
+                st.error(f"❌ Import-Fehler: {str(e)}")
+
 st.markdown("---")
 
 # Zeige Batch-Status wenn im Batch-Modus
@@ -890,6 +948,93 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
             key="download_gesamt_excel",
             use_container_width=False
         )
+
+        # Kanzleisoftware-Export
+        st.markdown("---")
+        st.subheader("🔄 Export für Kanzleisoftware")
+
+        with st.expander("📤 Export für RA-MICRO / DATEV", expanded=False):
+            st.info("**Exportieren Sie die verarbeiteten Dokumente für Re-Import in Ihre Kanzleisoftware**")
+
+            sync_manager = KanzleiSoftwareSync(storage.storage_dir)
+
+            # Export-Format wählen
+            export_format = st.radio(
+                "Export-Format:",
+                ["RA-MICRO", "DATEV"],
+                horizontal=True
+            )
+
+            col_exp1, col_exp2 = st.columns(2)
+
+            with col_exp1:
+                if st.button("📥 Export erstellen", type="primary"):
+                    try:
+                        # Hole verarbeitete Dokumente
+                        alle_daten = st.session_state.get('alle_daten', [])
+
+                        if export_format == "RA-MICRO":
+                            export_bytes = sync_manager.export_for_ramicro_import(alle_daten)
+                            filename = f"RHM_Export_RA-MICRO_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                        else:  # DATEV
+                            export_bytes = sync_manager.export_for_datev_import(alle_daten)
+                            filename = f"RHM_Export_DATEV_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+                        # Speichere in Session State für Download
+                        st.session_state.kanzlei_export = {
+                            'data': export_bytes,
+                            'filename': filename
+                        }
+
+                        st.success(f"✅ Export für {export_format} erstellt!")
+
+                    except Exception as e:
+                        st.error(f"❌ Export-Fehler: {str(e)}")
+
+            with col_exp2:
+                # Download-Button nur zeigen wenn Export vorhanden
+                if 'kanzlei_export' in st.session_state:
+                    export_data = st.session_state.kanzlei_export
+                    st.download_button(
+                        label="💾 Export herunterladen",
+                        data=export_data['data'],
+                        file_name=export_data['filename'],
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="download_kanzlei_export"
+                    )
+
+            # Info-Box mit Spalten-Beschreibung
+            with st.expander("ℹ️ Export-Spalten"):
+                if export_format == "RA-MICRO":
+                    st.markdown("""
+                    **RA-MICRO Export enthält:**
+                    - AktenNr
+                    - Dokumenttyp (Posteingang)
+                    - Datum
+                    - Absender
+                    - Empfänger
+                    - Sachbearbeiter
+                    - Dateiname
+                    - Betreff (Stichworte)
+                    - Frist
+                    - Priorität
+                    - Verarbeitet (Timestamp)
+                    """)
+                else:
+                    st.markdown("""
+                    **DATEV Export enthält:**
+                    - Akten-Nr.
+                    - Belegart (Posteingang)
+                    - Belegdatum
+                    - Absender
+                    - Empfänger
+                    - Bearbeiter
+                    - Dokumentname
+                    - Beschreibung (Stichworte)
+                    - Wiedervorlagedatum (Frist)
+                    - Priorität
+                    - Erfassungsdatum
+                    """)
 
         # Email-Versand an RENOs
         st.markdown("---")
