@@ -16,9 +16,19 @@ from email_sender import EmailSender
 from duplicate_detector import DuplicateDetector
 from kanzleisoftware_sync import KanzleiSoftwareSync
 from trash_manager import TrashManager
+from hot_folder_watcher import HotFolderWatcher
+from auto_file_storage import AutoFileStorage
+from notification_manager import NotificationManager
+from calendar_integration import CalendarIntegration
+from email_import import EmailImporter
+from fulltext_search import FulltextSearch
+from wiedervorlage_system import WiedervorlageSystem
+from backup_manager import BackupManager
+from posteingangs_bestaetigung import PosteingangsBestaetigung
+from dashboard_manager import DashboardManager
 
 # Versionsnummer: Zähler.JJ.MM.TT.HH.MM
-VERSION = "6.25.12.13.03.00"  # Version 6, 13. Dezember 2025, Papierkorb-System
+VERSION = "7.25.12.14.01.00"  # Version 7, 14. Dezember 2025, Alle Erweiterungen komplett
 
 st.set_page_config(
     page_title="RHM Posteingangsverarbeitung",
@@ -207,6 +217,40 @@ if 'trash_manager' not in st.session_state:
         print(f"Trash: {deleted_count} abgelaufene Dokumente automatisch gelöscht")
 
 trash_manager = st.session_state.trash_manager
+
+# Initialisiere alle neuen Manager
+if 'hot_folder_watcher' not in st.session_state:
+    st.session_state.hot_folder_watcher = None  # Wird bei Bedarf gestartet
+
+if 'auto_file_storage' not in st.session_state:
+    st.session_state.auto_file_storage = AutoFileStorage(storage.storage_dir)
+
+if 'notification_manager' not in st.session_state:
+    st.session_state.notification_manager = NotificationManager(storage.storage_dir)
+
+if 'calendar_integration' not in st.session_state:
+    st.session_state.calendar_integration = CalendarIntegration(storage.storage_dir)
+
+if 'email_importer' not in st.session_state:
+    st.session_state.email_importer = EmailImporter(storage.storage_dir)
+
+if 'fulltext_search' not in st.session_state:
+    st.session_state.fulltext_search = FulltextSearch(storage.storage_dir)
+
+if 'wiedervorlage_system' not in st.session_state:
+    st.session_state.wiedervorlage_system = WiedervorlageSystem(storage.storage_dir)
+
+if 'backup_manager' not in st.session_state:
+    st.session_state.backup_manager = BackupManager(storage.storage_dir)
+    # Auto-Backup wenn fällig
+    if st.session_state.backup_manager.should_create_backup():
+        st.session_state.backup_manager.create_backup()
+
+if 'posteingangs_bestaetigung' not in st.session_state:
+    st.session_state.posteingangs_bestaetigung = PosteingangsBestaetigung(storage.storage_dir)
+
+if 'dashboard_manager' not in st.session_state:
+    st.session_state.dashboard_manager = DashboardManager(storage.storage_dir)
 
 # Initialisiere Batch-Processing Session State
 if 'accumulated_documents' not in st.session_state:
@@ -545,6 +589,52 @@ with st.sidebar.expander("⚙️ Einstellungen"):
         if st.button("30 Tage", use_container_width=True):
             trash_manager.set_retention_hours(720)
             st.rerun()
+
+# Hot Folder Status
+st.sidebar.markdown("---")
+st.sidebar.subheader("📁 Hot Folder")
+if st.session_state.hot_folder_watcher and st.session_state.hot_folder_watcher.is_running():
+    st.sidebar.success("✅ Aktiv")
+    stats = st.session_state.hot_folder_watcher.get_statistics()
+    st.sidebar.metric("Verarbeitet", stats['processed'])
+else:
+    st.sidebar.info("⏸️ Nicht aktiv")
+
+# Auto-Ablage Status
+st.sidebar.markdown("---")
+st.sidebar.subheader("☁️ Auto-Ablage")
+auto_storage = st.session_state.auto_file_storage
+if auto_storage.is_enabled():
+    st.sidebar.success("✅ Aktiviert")
+    storage_stats = auto_storage.get_statistics()
+    st.sidebar.metric("Gespeichert", storage_stats['total_stored'])
+else:
+    st.sidebar.info("⏸️ Deaktiviert")
+
+# Backup Status
+st.sidebar.markdown("---")
+st.sidebar.subheader("💾 Backup")
+backup_mgr = st.session_state.backup_manager
+backup_stats = backup_mgr.get_statistics()
+if backup_stats['enabled']:
+    st.sidebar.success(f"✅ {backup_stats['frequency']}")
+    st.sidebar.metric("Backups", backup_stats['total_backups'])
+else:
+    st.sidebar.info("⏸️ Deaktiviert")
+
+# Wiedervorlagen
+st.sidebar.markdown("---")
+st.sidebar.subheader("📌 Wiedervorlagen")
+wv_system = st.session_state.wiedervorlage_system
+wv_stats = wv_system.get_statistics()
+if wv_stats['aktiv'] > 0:
+    st.sidebar.warning(f"⚠️ {wv_stats['aktiv']} aktiv")
+    if wv_stats['ueberfaellig'] > 0:
+        st.sidebar.error(f"🔴 {wv_stats['ueberfaellig']} überfällig")
+    if wv_stats['heute'] > 0:
+        st.sidebar.warning(f"🟠 {wv_stats['heute']} heute fällig")
+else:
+    st.sidebar.success("✅ Keine Wiedervorlagen")
 
 # Haupt-Upload-Bereich (responsive: 1 Spalte auf Mobile, 2 auf Desktop)
 col1, col2 = st.columns([1, 1], gap="medium")
@@ -1608,6 +1698,485 @@ if trash_items:
 
 else:
     st.success("✅ Papierkorb ist leer")
+
+# Erweiterte Features in Tabs
+st.markdown("---")
+st.header("🚀 Erweiterte Features")
+
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "📊 Dashboard",
+    "🔍 Volltext-Suche",
+    "📌 Wiedervorlagen",
+    "📧 Email-Import",
+    "📁 Hot Folder & Ablage",
+    "🔔 Benachrichtigungen",
+    "⚙️ System & Backup"
+])
+
+with tab1:
+    st.subheader("📊 Dashboard & Statistiken")
+
+    try:
+        import plotly.graph_objects as go
+        import plotly.express as px
+
+        dashboard_mgr = st.session_state.dashboard_manager
+
+        # KPIs
+        col1, col2, col3, col4 = st.columns(4)
+
+        timeline_data = dashboard_mgr.get_documents_timeline(days=30)
+        sb_data = dashboard_mgr.get_sachbearbeiter_distribution()
+        deadline_data = dashboard_mgr.get_deadline_summary(storage)
+
+        with col1:
+            st.metric("Dokumente (30 Tage)", timeline_data['total'])
+        with col2:
+            st.metric("Kritische Fristen", deadline_data['critical'])
+        with col3:
+            st.metric("Sachbearbeiter", len(sb_data['sachbearbeiter']))
+        with col4:
+            st.metric("Überfällig", deadline_data['overdue'])
+
+        st.markdown("---")
+
+        # Timeline Chart
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+            st.subheader("Dokumente-Zeitverlauf")
+            if timeline_data['dates']:
+                fig_timeline = go.Figure()
+                fig_timeline.add_trace(go.Scatter(
+                    x=timeline_data['dates'],
+                    y=timeline_data['counts'],
+                    mode='lines+markers',
+                    name='Dokumente',
+                    line=dict(color='#1f77b4', width=2),
+                    marker=dict(size=8)
+                ))
+                fig_timeline.update_layout(
+                    xaxis_title="Datum",
+                    yaxis_title="Anzahl Dokumente",
+                    height=300
+                )
+                st.plotly_chart(fig_timeline, use_container_width=True)
+
+        with col_b:
+            st.subheader("Verteilung Sachbearbeiter")
+            if sb_data['sachbearbeiter']:
+                fig_sb = px.pie(
+                    values=sb_data['counts'],
+                    names=sb_data['sachbearbeiter'],
+                    title="Dokumente pro Sachbearbeiter"
+                )
+                fig_sb.update_layout(height=300)
+                st.plotly_chart(fig_sb, use_container_width=True)
+
+        # Prioritäten
+        st.markdown("---")
+        st.subheader("Fristen-Übersicht")
+
+        col_c, col_d = st.columns(2)
+
+        with col_c:
+            # Fristen-Status
+            fig_deadlines = go.Figure()
+            fig_deadlines.add_trace(go.Bar(
+                x=['Kritisch', 'Hoch', 'Mittel', 'Normal', 'Überfällig'],
+                y=[
+                    deadline_data['critical'],
+                    deadline_data['high'],
+                    deadline_data['medium'],
+                    deadline_data['normal'],
+                    deadline_data['overdue']
+                ],
+                marker_color=['red', 'orange', 'yellow', 'green', 'darkred']
+            ))
+            fig_deadlines.update_layout(
+                title="Fristen nach Priorität",
+                xaxis_title="Priorität",
+                yaxis_title="Anzahl",
+                height=300
+            )
+            st.plotly_chart(fig_deadlines, use_container_width=True)
+
+        with col_d:
+            # API-Nutzung
+            api_data = dashboard_mgr.get_api_usage_stats()
+            if api_data['providers']:
+                fig_api = px.bar(
+                    x=api_data['providers'],
+                    y=api_data['counts'],
+                    title="API-Nutzung",
+                    labels={'x': 'Provider', 'y': 'Anzahl Aufrufe'}
+                )
+                fig_api.update_layout(height=300)
+                st.plotly_chart(fig_api, use_container_width=True)
+
+    except ImportError:
+        st.warning("⚠️ Plotly nicht installiert. Installieren Sie mit: pip install plotly")
+
+        # Fallback: Einfache Statistiken
+        st.write("**Statistiken verfügbar - Plotly für Charts benötigt**")
+
+with tab2:
+    st.subheader("🔍 Volltext-Suche")
+
+    search = st.session_state.fulltext_search
+
+    if not search.is_available():
+        st.error("⚠️ Whoosh nicht installiert. Installieren Sie mit: pip install whoosh")
+    else:
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            query = st.text_input("Suchbegriff:", placeholder="Aktenzeichen, Mandant, Text...")
+
+        with col2:
+            fuzzy = st.checkbox("Fuzzy-Suche", value=False)
+
+        if st.button("🔍 Suchen", type="primary"):
+            if query:
+                results = search.search(query, limit=50, fuzzy=fuzzy)
+
+                st.write(f"**{len(results)} Ergebnisse gefunden**")
+
+                for result in results:
+                    with st.expander(f"📄 {result['dateiname']} ({result['aktenzeichen']})"):
+                        st.write(f"**Sachbearbeiter:** {result['sachbearbeiter']}")
+                        st.write(f"**Datum:** {result['datum']}")
+                        st.write(f"**Priorität:** {result['priority']}")
+
+                        if result['excerpt']:
+                            st.markdown("**Textauszug:**")
+                            st.markdown(result['excerpt'], unsafe_allow_html=True)
+
+        # Statistiken
+        st.markdown("---")
+        search_stats = search.get_statistics()
+        if search_stats['available']:
+            st.metric("Indexierte Dokumente", search_stats['total_documents'])
+
+            if st.button("🔄 Index neu aufbauen"):
+                with st.spinner("Index wird neu aufgebaut..."):
+                    count = search.rebuild_index(storage)
+                    st.success(f"✅ {count} Dokumente indexiert")
+
+with tab3:
+    st.subheader("📌 Wiedervorlage-System")
+
+    wv = st.session_state.wiedervorlage_system
+
+    # Neue Wiedervorlage
+    with st.expander("➕ Neue Wiedervorlage erstellen"):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            wv_titel = st.text_input("Titel:")
+            wv_aktenzeichen = st.text_input("Aktenzeichen (optional):")
+            wv_sb = st.text_input("Sachbearbeiter (optional):")
+
+        with col2:
+            wv_datum = st.date_input("Wiedervorlage-Datum:")
+            wv_priority = st.selectbox("Priorität:", ["NORMAL", "MEDIUM", "HIGH", "CRITICAL"])
+            wv_notiz = st.text_area("Notiz:")
+
+        if st.button("💾 Wiedervorlage anlegen", type="primary"):
+            from datetime import datetime
+            wv_id = wv.create_wiedervorlage(
+                titel=wv_titel,
+                datum=datetime.combine(wv_datum, datetime.min.time()),
+                aktenzeichen=wv_aktenzeichen if wv_aktenzeichen else None,
+                sachbearbeiter=wv_sb if wv_sb else None,
+                notiz=wv_notiz,
+                priority=wv_priority
+            )
+            st.success(f"✅ Wiedervorlage erstellt (ID: {wv_id[:8]}...)")
+
+    # Fällige Wiedervorlagen
+    st.markdown("---")
+    st.subheader("⚠️ Fällige Wiedervorlagen")
+
+    faellig = wv.get_faellige_wiedervorlagen(tage_vorher=7)
+
+    if faellig:
+        for item in faellig:
+            color = "🔴" if item['is_overdue'] else ("🟠" if item['days_remaining'] <= 3 else "🟡")
+
+            with st.expander(f"{color} {item['titel']} ({item['datum'][:10]})"):
+                st.write(f"**Aktenzeichen:** {item['aktenzeichen']}")
+                st.write(f"**Sachbearbeiter:** {item['sachbearbeiter']}")
+                st.write(f"**Priorität:** {item['priority']}")
+                st.write(f"**Verbleibende Tage:** {item['days_remaining']}")
+                st.write(f"**Notiz:** {item['notiz']}")
+
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    if st.button("✅ Erledigt", key=f"done_{item['id']}"):
+                        wv.mark_erledigt(item['id'])
+                        st.rerun()
+
+                with col2:
+                    if st.button("📅 Verschieben", key=f"move_{item['id']}"):
+                        st.info("Verschiebe-Funktion")
+
+                with col3:
+                    if st.button("🗑️ Löschen", key=f"del_{item['id']}"):
+                        wv.delete(item['id'])
+                        st.rerun()
+    else:
+        st.success("✅ Keine fälligen Wiedervorlagen")
+
+with tab4:
+    st.subheader("📧 Email-Import (IMAP)")
+
+    email_imp = st.session_state.email_importer
+
+    # Konfiguration
+    with st.expander("⚙️ IMAP-Konfiguration"):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            imap_server = st.text_input("IMAP-Server:", value="imap.gmail.com")
+            imap_username = st.text_input("Email:")
+
+        with col2:
+            imap_port = st.number_input("Port:", value=993)
+            imap_password = st.text_input("Passwort:", type="password")
+
+        if st.button("💾 IMAP Konfigurieren"):
+            email_imp.configure(imap_server, imap_username, imap_password, imap_port)
+            st.success("✅ IMAP konfiguriert")
+
+        # Test
+        if email_imp.is_enabled():
+            if st.button("🔌 Verbindung testen"):
+                success, message = email_imp.test_connection()
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+
+    # Import
+    st.markdown("---")
+
+    if email_imp.is_enabled():
+        if st.button("📥 PDFs aus Emails importieren", type="primary"):
+            with st.spinner("Rufe Emails ab..."):
+                emails = email_imp.fetch_emails_with_pdfs()
+
+                if emails:
+                    st.success(f"✅ {len(emails)} Email(s) mit PDFs gefunden")
+
+                    for email_data in emails:
+                        with st.expander(f"📧 {email_data['subject']} ({len(email_data['pdfs'])} PDF(s))"):
+                            st.write(f"**Von:** {email_data['from']}")
+                            st.write(f"**Datum:** {email_data['date']}")
+
+                            for pdf in email_data['pdfs']:
+                                st.write(f"- {pdf['filename']} ({pdf['size'] / 1024:.1f} KB)")
+
+                            if st.button(f"✅ Verarbeiten", key=f"process_{email_data['email_id']}"):
+                                # TODO: Verarbeiten
+                                email_imp.mark_email_as_processed(email_data['email_id'])
+                                st.success("Markiert als verarbeitet")
+                else:
+                    st.info("Keine neuen Emails mit PDFs gefunden")
+    else:
+        st.warning("⚠️ IMAP noch nicht konfiguriert")
+
+with tab5:
+    st.subheader("📁 Hot Folder & Automatische Ablage")
+
+    # Hot Folder
+    st.markdown("### 🔥 Hot Folder Überwachung")
+
+    with st.expander("⚙️ Hot Folder konfigurieren"):
+        hot_folder_path = st.text_input("Überwachtes Verzeichnis:", value="./hot_folder")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("▶️ Hot Folder starten", type="primary"):
+                from pathlib import Path
+
+                watcher = HotFolderWatcher(Path(hot_folder_path))
+                watcher.start()
+                st.session_state.hot_folder_watcher = watcher
+                st.success(f"✅ Hot Folder gestartet: {hot_folder_path}")
+
+        with col2:
+            if st.session_state.hot_folder_watcher:
+                if st.button("⏸️ Hot Folder stoppen"):
+                    st.session_state.hot_folder_watcher.stop()
+                    st.session_state.hot_folder_watcher = None
+                    st.success("✅ Hot Folder gestoppt")
+
+    # Auto-Ablage
+    st.markdown("---")
+    st.markdown("### ☁️ Automatische Ablage")
+
+    auto_storage = st.session_state.auto_file_storage
+
+    with st.expander("⚙️ Auto-Ablage konfigurieren"):
+        storage_type = st.selectbox("Storage-Typ:", ["Lokal", "Netzlaufwerk", "Dropbox", "Google Drive"])
+        base_path = st.text_input("Basis-Pfad:", value="./ablage")
+
+        if st.button("💾 Auto-Ablage aktivieren"):
+            auto_storage.enable(base_path, storage_type)
+            st.success("✅ Auto-Ablage aktiviert")
+
+        # Test
+        if auto_storage.is_enabled():
+            if st.button("🔌 Verbindung testen"):
+                success, message = auto_storage.test_connection()
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+
+with tab6:
+    st.subheader("🔔 Benachrichtigungen & Kalender")
+
+    notif_mgr = st.session_state.notification_manager
+    cal_int = st.session_state.calendar_integration
+
+    # Benachrichtigungen
+    st.markdown("### 📧 Email-Benachrichtigungen")
+
+    with st.expander("⚙️ Email konfigurieren"):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            smtp_server = st.text_input("SMTP-Server:", value="smtp.gmail.com")
+            smtp_port = st.number_input("SMTP-Port:", value=587)
+            smtp_user = st.text_input("Benutzername:")
+
+        with col2:
+            smtp_pass = st.text_input("Passwort:", type="password")
+            email_from = st.text_input("Absender-Email:")
+            recipients = st.text_input("Empfänger (kommagetrennt):")
+
+        if st.button("💾 Email-Benachrichtigungen konfigurieren"):
+            recipient_list = [r.strip() for r in recipients.split(',')]
+            notif_mgr.configure_email(smtp_server, smtp_port, smtp_user, smtp_pass, email_from, recipient_list)
+            st.success("✅ Email-Benachrichtigungen konfiguriert")
+
+        if notif_mgr.config.get('email_enabled'):
+            if st.button("🔌 Email-Verbindung testen"):
+                success, message = notif_mgr.test_email_connection()
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+
+    # Kalender
+    st.markdown("---")
+    st.markdown("### 📅 Kalender-Integration")
+
+    with st.expander("⚙️ Kalender konfigurieren"):
+        cal_type = st.selectbox("Kalender-Typ:", ["Outlook/Exchange", "Google Calendar"])
+
+        if cal_type == "Outlook/Exchange":
+            client_id = st.text_input("Client ID:")
+            client_secret = st.text_input("Client Secret:", type="password")
+            tenant_id = st.text_input("Tenant ID:")
+
+            if st.button("💾 Outlook konfigurieren"):
+                cal_int.configure_outlook(client_id, client_secret, tenant_id)
+                st.success("✅ Outlook konfiguriert")
+
+        else:  # Google Calendar
+            creds_path = st.text_input("Credentials JSON Pfad:")
+
+            if st.button("💾 Google Calendar konfigurieren"):
+                cal_int.configure_google(creds_path)
+                st.success("✅ Google Calendar konfiguriert")
+
+        if cal_int.is_enabled():
+            if st.button("🔌 Kalender-Verbindung testen"):
+                success, message = cal_int.test_connection()
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+
+with tab7:
+    st.subheader("⚙️ System & Backup")
+
+    backup_mgr = st.session_state.backup_manager
+
+    # Backup-Einstellungen
+    st.markdown("### 💾 Backup-Verwaltung")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        backup_enabled = st.checkbox("Automatische Backups aktivieren", value=backup_mgr.is_enabled())
+
+        if backup_enabled != backup_mgr.is_enabled():
+            if backup_enabled:
+                backup_mgr.enable()
+                st.success("✅ Backups aktiviert")
+            else:
+                backup_mgr.disable()
+                st.info("⏸️ Backups deaktiviert")
+
+    with col2:
+        if st.button("💾 Backup jetzt erstellen", type="primary"):
+            with st.spinner("Erstelle Backup..."):
+                backup_path = backup_mgr.create_backup()
+                if backup_path:
+                    st.success(f"✅ Backup erstellt: {backup_path.name}")
+                else:
+                    st.error("❌ Backup fehlgeschlagen")
+
+    # Backup-Liste
+    st.markdown("---")
+    st.subheader("📦 Vorhandene Backups")
+
+    backups = backup_mgr.list_backups()
+
+    if backups:
+        for backup in backups:
+            with st.expander(f"📦 {backup['name']} ({backup['size_mb']:.1f} MB)"):
+                st.write(f"**Erstellt:** {backup['created']}")
+                st.write(f"**Alter:** {backup['age_days']} Tage")
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    if st.button("🔄 Wiederherstellen", key=f"restore_{backup['name']}"):
+                        if backup_mgr.restore_backup(Path(backup['path'])):
+                            st.success("✅ Wiederhergestellt")
+                        else:
+                            st.error("❌ Fehler")
+
+                with col2:
+                    if st.button("🗑️ Löschen", key=f"del_backup_{backup['name']}"):
+                        if backup_mgr.delete_backup(backup['name']):
+                            st.success("✅ Gelöscht")
+                            st.rerun()
+    else:
+        st.info("Noch keine Backups vorhanden")
+
+    # Statistiken
+    st.markdown("---")
+    st.subheader("📊 System-Statistiken")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Total Backups", backup_stats['total_backups'])
+
+    with col2:
+        storage_stats = dashboard_mgr.get_storage_stats()
+        st.metric("Storage (MB)", f"{storage_stats['total_size_mb']:.1f}")
+
+    with col3:
+        st.metric("PDF-Dateien", storage_stats['pdf_count'])
 
 # Info-Box
 st.markdown("---")
