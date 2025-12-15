@@ -960,92 +960,92 @@ if current_user['role'] in ['Administrator', 'Empfang']:
 
     with col1:
         st.subheader("📄 Tagespost-PDF hochladen")
-    uploaded_pdf = st.file_uploader(
-        "PDF-Datei mit Tagespost (OCR)",
-        type=["pdf"],
-        help="Laden Sie die OCR-PDF-Datei mit der Tagespost hoch"
-    )
-
-with col2:
-    st.subheader("📊 Aktenregister hochladen")
-
-    # Zeige Status: Gespeichertes Register vorhanden?
-    if storage.has_aktenregister():
-        stats = storage.get_aktenregister_stats()
-        # Format timestamp
-        from datetime import datetime
-        dt = datetime.fromtimestamp(stats['last_modified'])
-        formatted = dt.strftime('%d.%m.%Y %H:%M')
-        st.success(f"💾 Gespeichertes Register: {stats['count']} Akten\n\n*Zuletzt aktualisiert: {formatted}*")
-
-        # Lösch-Button
-        if st.button("🗑️ Gespeichertes Register löschen"):
-            storage.delete_aktenregister()
-            st.rerun()
-
-    uploaded_excel = st.file_uploader(
-        "Neues Aktenregister (wird mit vorhandenem gemergt)" if storage.has_aktenregister() else "aktenregister.xlsx",
-        type=["xlsx"],
-        help="Neue Daten werden mit gespeicherten Daten zusammengeführt",
-        key="excel_uploader"
-    )
-
-    # Kanzleisoftware-Integration
-    with st.expander("🔄 Kanzleisoftware-Import (RA-MICRO / DATEV)"):
-        st.info("**Importieren Sie Ihr Aktenregister direkt aus RA-MICRO oder DATEV**")
-
-        sync_manager = KanzleiSoftwareSync(storage.storage_dir)
-
-        # Template Download
-        if st.button("📥 Mapping-Template herunterladen"):
-            template_bytes = sync_manager.create_mapping_template()
-            st.download_button(
-                label="💾 Template speichern",
-                data=template_bytes,
-                file_name="kanzleisoftware_mapping_template.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-        # Import aus Kanzleisoftware
-        kanzlei_import = st.file_uploader(
-            "Excel-Export aus RA-MICRO/DATEV",
-            type=["xlsx"],
-            help="Automatische Format-Erkennung",
-            key="kanzlei_import"
+        uploaded_pdf = st.file_uploader(
+            "PDF-Datei mit Tagespost (OCR)",
+            type=["pdf"],
+            help="Laden Sie die OCR-PDF-Datei mit der Tagespost hoch"
         )
 
-        if kanzlei_import:
-            try:
-                # Automatischer Import mit Format-Erkennung
-                rhm_df, detected_format = sync_manager.import_auto(BytesIO(kanzlei_import.read()))
+    with col2:
+        st.subheader("📊 Aktenregister hochladen")
 
-                st.success(f"✅ Format erkannt: **{detected_format}**")
-                st.info(f"📊 {len(rhm_df)} Akten importiert")
+        # Zeige Status: Gespeichertes Register vorhanden?
+        if storage.has_aktenregister():
+            stats = storage.get_aktenregister_stats()
+            # Format timestamp
+            from datetime import datetime
+            dt = datetime.fromtimestamp(stats['last_modified'])
+            formatted = dt.strftime('%d.%m.%Y %H:%M')
+            st.success(f"💾 Gespeichertes Register: {stats['count']} Akten\n\n*Zuletzt aktualisiert: {formatted}*")
 
-                # Validierung
-                validation = sync_manager.validate_import(rhm_df)
+            # Lösch-Button
+            if st.button("🗑️ Gespeichertes Register löschen"):
+                storage.delete_aktenregister()
+                st.rerun()
 
-                if validation['warnings']:
-                    for warning in validation['warnings']:
-                        st.warning(f"⚠️ {warning}")
+        uploaded_excel = st.file_uploader(
+            "Neues Aktenregister (wird mit vorhandenem gemergt)" if storage.has_aktenregister() else "aktenregister.xlsx",
+            type=["xlsx"],
+            help="Neue Daten werden mit gespeicherten Daten zusammengeführt",
+            key="excel_uploader"
+        )
 
-                if validation['errors']:
-                    for error in validation['errors']:
-                        st.error(f"❌ {error}")
+        # Kanzleisoftware-Integration
+        with st.expander("🔄 Kanzleisoftware-Import (RA-MICRO / DATEV)"):
+            st.info("**Importieren Sie Ihr Aktenregister direkt aus RA-MICRO oder DATEV**")
 
-                # Vorschau
-                with st.expander("👁️ Daten-Vorschau"):
-                    st.dataframe(rhm_df.head(10))
+            sync_manager = KanzleiSoftwareSync(storage.storage_dir)
 
-                # Import-Button
-                if st.button("✅ Als Aktenregister übernehmen", type="primary"):
-                    # Speichere als Aktenregister
-                    merged_df = storage.save_aktenregister(rhm_df, merge=storage.has_aktenregister())
-                    st.success(f"✅ {len(merged_df)} Akten im Register gespeichert!")
-                    st.rerun()
+            # Template Download
+            if st.button("📥 Mapping-Template herunterladen"):
+                template_bytes = sync_manager.create_mapping_template()
+                st.download_button(
+                    label="💾 Template speichern",
+                    data=template_bytes,
+                    file_name="kanzleisoftware_mapping_template.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
-            except Exception as e:
-                st.error(f"❌ Import-Fehler: {str(e)}")
+            # Import aus Kanzleisoftware
+            kanzlei_import = st.file_uploader(
+                "Excel-Export aus RA-MICRO/DATEV",
+                type=["xlsx"],
+                help="Automatische Format-Erkennung",
+                key="kanzlei_import"
+            )
+
+            if kanzlei_import:
+                try:
+                    # Automatischer Import mit Format-Erkennung
+                    rhm_df, detected_format = sync_manager.import_auto(BytesIO(kanzlei_import.read()))
+
+                    st.success(f"✅ Format erkannt: **{detected_format}**")
+                    st.info(f"📊 {len(rhm_df)} Akten importiert")
+
+                    # Validierung
+                    validation = sync_manager.validate_import(rhm_df)
+
+                    if validation['warnings']:
+                        for warning in validation['warnings']:
+                            st.warning(f"⚠️ {warning}")
+
+                    if validation['errors']:
+                        for error in validation['errors']:
+                            st.error(f"❌ {error}")
+
+                    # Vorschau
+                    with st.expander("👁️ Daten-Vorschau"):
+                        st.dataframe(rhm_df.head(10))
+
+                    # Import-Button
+                    if st.button("✅ Als Aktenregister übernehmen", type="primary"):
+                        # Speichere als Aktenregister
+                        merged_df = storage.save_aktenregister(rhm_df, merge=storage.has_aktenregister())
+                        st.success(f"✅ {len(merged_df)} Akten im Register gespeichert!")
+                        st.rerun()
+
+                except Exception as e:
+                    st.error(f"❌ Import-Fehler: {str(e)}")
 
 st.markdown("---")
 
