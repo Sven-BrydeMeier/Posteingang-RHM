@@ -51,9 +51,9 @@ class UserManager:
         self.sessions = self._load_sessions()
         self.password_resets = self._load_password_resets()
 
-        # Erstelle Default-Admin wenn keine Benutzer
+        # Erstelle Default-Benutzer (Admin + Empfang) wenn keine Benutzer vorhanden
         if not self.users:
-            self._create_default_admin()
+            self._create_default_users()
 
     def _load_users(self) -> Dict:
         """Lädt Benutzer"""
@@ -127,10 +127,11 @@ class UserManager:
         except Exception as e:
             print(f"Fehler beim Speichern: {e}")
 
-    def _create_default_admin(self):
-        """Erstellt Default-Admin-Benutzer"""
-        admin_password = "admin123"  # WICHTIG: Beim ersten Login ändern!
+    def _create_default_users(self):
+        """Erstellt Default-Benutzer (Admin + Empfang)"""
 
+        # Admin-Benutzer
+        admin_password = "admin123"
         self.create_user(
             email="admin@rhm-kanzlei.de",
             password=admin_password,
@@ -139,10 +140,27 @@ class UserManager:
             kuerzel="ADMIN"
         )
 
-        print("⚠️ Default-Admin erstellt:")
-        print("   Email: admin@rhm-kanzlei.de")
-        print("   Passwort: admin123")
-        print("   BITTE SOFORT ÄNDERN!")
+        # Empfang-Benutzer (Demo-Zugang)
+        empfang_password = "empfang123"
+        self.create_user(
+            email="empfang@rhm-kanzlei.de",
+            password=empfang_password,
+            role=UserRole.EMPFANG.value,
+            name="Empfang",
+            kuerzel="EMPFANG"
+        )
+
+        print("⚠️ Default-Benutzer erstellt:")
+        print("")
+        print("   👤 ADMIN:")
+        print("      Email: admin@rhm-kanzlei.de")
+        print("      Passwort: admin123")
+        print("")
+        print("   📬 EMPFANG (Demo):")
+        print("      Email: empfang@rhm-kanzlei.de")
+        print("      Passwort: empfang123")
+        print("")
+        print("   ⚠️ BITTE BEIDE PASSWÖRTER SOFORT ÄNDERN!")
 
     def _hash_password(self, password: str) -> str:
         """Hasht Passwort mit bcrypt"""

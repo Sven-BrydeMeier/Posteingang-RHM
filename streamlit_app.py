@@ -283,7 +283,15 @@ if not st.session_state.current_user:
                     st.warning("⚠️ Bitte Email und Passwort eingeben")
 
         with col2:
-            st.info("**Standard-Admin**: admin@rhm-kanzlei.de / admin123")
+            st.info("""
+            **Demo-Zugänge:**
+
+            👤 **Admin**: admin@rhm-kanzlei.de / admin123
+
+            📬 **Empfang**: empfang@rhm-kanzlei.de / empfang123
+
+            ⚠️ Bitte Passwörter nach erstem Login ändern!
+            """)
 
     with tab2:
         st.subheader("✉️ Registrierung mit Einladung")
