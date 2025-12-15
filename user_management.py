@@ -558,3 +558,58 @@ class UserManager:
                 if datetime.now() <= expires_at:
                     pending.append(reset)
         return pending
+
+    def reset_demo_users(self) -> bool:
+        """
+        Setzt Demo-Benutzer (Admin + Empfang) zurück
+
+        Löscht existierende Demo-Benutzer und erstellt sie neu.
+        Nützlich wenn Passwort-Hashes nicht mehr kompatibel sind.
+
+        Returns:
+            True bei Erfolg
+        """
+        try:
+            # Entferne existierende Demo-Benutzer
+            demo_emails = ['admin@rhm-kanzlei.de', 'empfang@rhm-kanzlei.de']
+
+            for email in demo_emails:
+                user_id = None
+                for uid, user in self.users.items():
+                    if user['email'] == email:
+                        user_id = uid
+                        break
+
+                if user_id:
+                    del self.users[user_id]
+
+            # Erstelle Demo-Benutzer neu
+            admin_password = "admin123"
+            self.create_user(
+                email="admin@rhm-kanzlei.de",
+                password=admin_password,
+                role=UserRole.ADMIN.value,
+                name="Administrator",
+                kuerzel="ADMIN"
+            )
+
+            empfang_password = "empfang123"
+            self.create_user(
+                email="empfang@rhm-kanzlei.de",
+                password=empfang_password,
+                role=UserRole.EMPFANG.value,
+                name="Empfang",
+                kuerzel="EMPFANG"
+            )
+
+            self._save_users()
+
+            print("✅ Demo-Benutzer zurückgesetzt:")
+            print("   👤 Admin: admin@rhm-kanzlei.de / admin123")
+            print("   📬 Empfang: empfang@rhm-kanzlei.de / empfang123")
+
+            return True
+
+        except Exception as e:
+            print(f"❌ Fehler beim Zurücksetzen: {e}")
+            return False

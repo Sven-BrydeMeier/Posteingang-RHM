@@ -293,6 +293,14 @@ if not st.session_state.current_user:
             ⚠️ Bitte Passwörter nach erstem Login ändern!
             """)
 
+            # Reset Demo Users Button
+            if st.button("🔄 Demo-Benutzer zurücksetzen", help="Setzt Admin und Empfang mit Standard-Passwörtern zurück"):
+                if user_manager.reset_demo_users():
+                    st.success("✅ Demo-Benutzer wurden zurückgesetzt!")
+                    st.info("Sie können sich jetzt mit den Standard-Zugangsdaten anmelden.")
+                else:
+                    st.error("❌ Fehler beim Zurücksetzen der Demo-Benutzer")
+
     with tab2:
         st.subheader("✉️ Registrierung mit Einladung")
 
