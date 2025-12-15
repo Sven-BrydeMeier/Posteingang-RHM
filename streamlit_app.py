@@ -828,11 +828,122 @@ if wv_stats['aktiv'] > 0:
 else:
     st.sidebar.success("✅ Keine Wiedervorlagen")
 
-# Haupt-Upload-Bereich (responsive: 1 Spalte auf Mobile, 2 auf Desktop)
-col1, col2 = st.columns([1, 1], gap="medium")
+# Admin/Empfang-Bereich
+if current_user['role'] in ['Administrator', 'Empfang']:
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("👥 Benutzerverwaltung")
 
-with col1:
-    st.subheader("📄 Tagespost-PDF hochladen")
+    with st.sidebar.expander("➕ Benutzer einladen"):
+        inv_email = st.text_input("Email:", key="sidebar_inv_email")
+        inv_role = st.selectbox("Rolle:", [
+            "Sachbearbeiter",
+            "Rechtsanwalt",
+            "Empfang",
+            "Administrator"
+        ])
+        inv_name = st.text_input("Name:", key="sidebar_inv_name")
+        inv_kuerzel = st.text_input("Kürzel (z.B. SQ):", key="sidebar_inv_kuerzel")
+
+        if st.button("📧 Einladung versenden", key="sidebar_send_inv"):
+            if inv_email and inv_name and inv_kuerzel:
+                token = user_manager.create_invitation(
+                    email=inv_email,
+                    role=inv_role,
+                    created_by=current_user['email'],
+                    name=inv_name,
+                    kuerzel=inv_kuerzel
+                )
+
+                invitation_link = f"?invitation={token}"
+                st.success("✅ Einladung erstellt!")
+                st.code(f"Token: {token[:32]}...")
+                st.caption("Link an Benutzer senden")
+            else:
+                st.warning("⚠️ Alle Felder ausfüllen")
+
+    # Benutzer-Übersicht
+    all_users = user_manager.get_all_users()
+    active_users = [u for u in all_users if u.get('active', True)]
+    st.sidebar.metric("Aktive Benutzer", len(active_users))
+
+# ============================================================================
+# PERSONALISIERTES DASHBOARD
+# ============================================================================
+
+st.header(f"👋 Willkommen, {current_user['name']}")
+
+# Dashboard-Daten holen
+dashboard_data = user_dash.get_dashboard_data(current_user, storage)
+
+# KPIs
+col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+
+with col_kpi1:
+    st.metric("Meine Dokumente", dashboard_data['total'])
+
+with col_kpi2:
+    new_count = dashboard_data['new_count']
+    st.metric("Neu (24h)", new_count)
+    if new_count > 0:
+        # Sende Benachrichtigung wenn noch nicht gesehen
+        if dashboard_data['unseen_count'] > 0:
+            browser_notif.send_notification_to_user(
+                current_user['id'],
+                f"📬 Neuer Posteingang",
+                f"{new_count} neue Dokument(e) für Sie!"
+            )
+
+with col_kpi3:
+    st.metric("Ungesehen", dashboard_data['unseen_count'])
+
+with col_kpi4:
+    critical = dashboard_data['statistics']['by_priority'].get('CRITICAL', 0)
+    st.metric("Kritische Fristen", critical)
+
+st.markdown("---")
+
+# Neue/Ungesehene Dokumente
+if dashboard_data['unseen_count'] > 0:
+    with st.expander(f"📬 {dashboard_data['unseen_count']} neue Dokument(e)", expanded=True):
+        for doc in dashboard_data['unseen_documents'][:5]:
+            col_a, col_b, col_c = st.columns([3, 1, 1])
+
+            with col_a:
+                st.write(f"**{doc.get('dateiname', 'Unbekannt')}**")
+                st.caption(f"AZ: {doc.get('aktenzeichen_info', {}).get('internes_az', '-')}")
+
+            with col_b:
+                priority = doc.get('analyse', {}).get('deadline_info', {}).get('priority', 'NORMAL')
+                st.caption(f"Priorität: {priority}")
+
+            with col_c:
+                if st.button("📥 Details", key=f"view_{doc.get('dateiname')}"):
+                    st.info("Download-Funktion hier")
+
+        # Markiere als gesehen
+        if st.button("✅ Alle als gesehen markieren"):
+            doc_ids = [d.get('dateiname') for d in dashboard_data['unseen_documents']]
+            user_dash.mark_documents_as_seen(current_user['id'], doc_ids)
+            st.rerun()
+
+st.markdown("---")
+
+# ============================================================================
+# POST-EINGANG (Nur für Empfang/Admin)
+# ============================================================================
+
+if current_user['role'] not in ['Administrator', 'Empfang']:
+    st.info("ℹ️ **Hinweis**: Der Post-Eingang-Bereich ist nur für Empfang und Administratoren zugänglich.")
+    st.markdown("---")
+
+# Haupt-Upload-Bereich (responsive: 1 Spalte auf Mobile, 2 auf Desktop)
+if current_user['role'] in ['Administrator', 'Empfang']:
+    st.header("📬 Post-Eingang scannen")
+
+    col1, col2 = st.columns([1, 1], gap="medium")
+
+    with col1:
+        st.subheader("📄 Tagespost-PDF hochladen")
     uploaded_pdf = st.file_uploader(
         "PDF-Datei mit Tagespost (OCR)",
         type=["pdf"],
