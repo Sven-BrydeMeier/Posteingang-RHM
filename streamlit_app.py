@@ -27,8 +27,9 @@ from backup_manager import BackupManager
 from posteingangs_bestaetigung import PosteingangsBestaetigung
 from dashboard_manager import DashboardManager
 
-# Versionsnummer: Zähler.JJ.MM.TT.HH.MM
-VERSION = "7.25.12.14.01.00"  # Version 7, 14. Dezember 2025, Alle Erweiterungen komplett
+# Versionsnummer: Zähler.JJ.MM.TT.HH.MM (HH.MM = echte Uhrzeit der letzten Änderung)
+_now = datetime.now()
+VERSION = f"7.{_now.strftime('%y.%m.%d.%H.%M')}"  # Version 7, automatische Zeitstempel
 
 st.set_page_config(
     page_title="RHM Posteingangsverarbeitung",
