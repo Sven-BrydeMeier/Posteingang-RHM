@@ -359,7 +359,7 @@ class AktenzeichenErkenner:
         return None
 
     def _suche_vollmuster(self, text: str) -> Optional[Dict]:
-        """
+        r"""
         Sucht nach Vollmustern: \d{1,5}/\d{2}(SQ|M|MQ|TS|FÜ|CV)...
         Unterstützt verschiedene Trennzeichen: / - .
         """
