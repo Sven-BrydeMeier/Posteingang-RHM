@@ -26,10 +26,13 @@ from wiedervorlage_system import WiedervorlageSystem
 from backup_manager import BackupManager
 from posteingangs_bestaetigung import PosteingangsBestaetigung
 from dashboard_manager import DashboardManager
+from user_management import UserManager, UserRole
+from browser_notifications import BrowserNotificationManager
+from user_dashboard import UserDashboard
 
 # Versionsnummer: Zähler.JJ.MM.TT.HH.MM (HH.MM = echte Uhrzeit der letzten Änderung)
 _now = datetime.now()
-VERSION = f"7.{_now.strftime('%y.%m.%d.%H.%M')}"  # Version 7, automatische Zeitstempel
+VERSION = f"8.{_now.strftime('%y.%m.%d.%H.%M')}"  # Version 8, Multi-User-System
 
 st.set_page_config(
     page_title="RHM Posteingangsverarbeitung",
@@ -199,15 +202,203 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📄 RHM | Automatisierter Posteingang")
-st.caption(f"Version {VERSION}")
-st.markdown("---")
+# ============================================================================
+# MULTI-USER SYSTEM & AUTHENTIFIZIERUNG
+# ============================================================================
 
-# Initialisiere Persistent Storage
+# Initialisiere Storage (benötigt für User-Management)
 if 'storage' not in st.session_state:
     st.session_state.storage = PersistentStorage()
 
 storage = st.session_state.storage
+
+# Initialisiere User-Management
+if 'user_manager' not in st.session_state:
+    st.session_state.user_manager = UserManager(storage.storage_dir)
+
+if 'browser_notifications' not in st.session_state:
+    st.session_state.browser_notifications = BrowserNotificationManager(storage.storage_dir)
+
+if 'user_dashboard' not in st.session_state:
+    st.session_state.user_dashboard = UserDashboard(storage.storage_dir)
+
+user_manager = st.session_state.user_manager
+browser_notif = st.session_state.browser_notifications
+user_dash = st.session_state.user_dashboard
+
+# Session Management
+if 'session_token' not in st.session_state:
+    st.session_state.session_token = None
+
+if 'current_user' not in st.session_state:
+    st.session_state.current_user = None
+
+# Prüfe Session
+if st.session_state.session_token:
+    user = user_manager.validate_session(st.session_state.session_token)
+    if user:
+        st.session_state.current_user = user
+    else:
+        st.session_state.session_token = None
+        st.session_state.current_user = None
+
+# ============================================================================
+# LOGIN / REGISTRIERUNG
+# ============================================================================
+
+if not st.session_state.current_user:
+    st.title("🔐 RHM Posteingang | Login")
+    st.caption(f"Version {VERSION}")
+    st.markdown("---")
+
+    # Browser-Benachrichtigungen-Script einbinden
+    st.components.v1.html(browser_notif.get_browser_support_script(), height=0)
+
+    tab1, tab2, tab3 = st.tabs(["Login", "Registrierung (Einladung)", "Passwort vergessen"])
+
+    with tab1:
+        st.subheader("📧 Anmelden")
+
+        login_email = st.text_input("Email:", key="login_email")
+        login_password = st.text_input("Passwort:", type="password", key="login_password")
+
+        col1, col2 = st.columns([1, 3])
+
+        with col1:
+            if st.button("🔓 Login", type="primary", use_container_width=True):
+                if login_email and login_password:
+                    user = user_manager.authenticate(login_email, login_password)
+
+                    if user:
+                        # Erstelle Session
+                        session_token = user_manager.create_session(user['id'])
+                        st.session_state.session_token = session_token
+                        st.session_state.current_user = user
+
+                        st.success(f"✅ Willkommen, {user['name']}!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Email oder Passwort falsch")
+                else:
+                    st.warning("⚠️ Bitte Email und Passwort eingeben")
+
+        with col2:
+            st.info("**Standard-Admin**: admin@rhm-kanzlei.de / admin123")
+
+    with tab2:
+        st.subheader("✉️ Registrierung mit Einladung")
+
+        inv_token = st.text_input("Einladungs-Token:", key="inv_token")
+
+        if inv_token:
+            invitation = user_manager.validate_invitation(inv_token)
+
+            if invitation:
+                st.success(f"✅ Gültige Einladung für: {invitation['email']}")
+                st.info(f"**Rolle**: {invitation['role']}")
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    reg_name = st.text_input("Ihr Name:", value=invitation.get('name', ''))
+                    reg_kuerzel = st.text_input("Kürzel:", value=invitation.get('kuerzel', ''))
+
+                with col2:
+                    reg_password = st.text_input("Passwort wählen:", type="password", key="reg_pass1")
+                    reg_password2 = st.text_input("Passwort wiederholen:", type="password", key="reg_pass2")
+
+                if st.button("✅ Registrierung abschließen", type="primary"):
+                    if not all([reg_name, reg_kuerzel, reg_password, reg_password2]):
+                        st.error("❌ Bitte alle Felder ausfüllen")
+                    elif reg_password != reg_password2:
+                        st.error("❌ Passwörter stimmen nicht überein")
+                    elif len(reg_password) < 6:
+                        st.error("❌ Passwort muss mindestens 6 Zeichen lang sein")
+                    else:
+                        # Update Einladung mit Namen/Kürzel
+                        invitation['name'] = reg_name
+                        invitation['kuerzel'] = reg_kuerzel
+
+                        # Akzeptiere Einladung
+                        if user_manager.accept_invitation(inv_token, reg_password):
+                            st.success("✅ Registrierung erfolgreich! Bitte jetzt einloggen.")
+                            st.balloons()
+                        else:
+                            st.error("❌ Fehler bei der Registrierung")
+            else:
+                st.error("❌ Ungültiger oder abgelaufener Einladungs-Token")
+
+    with tab3:
+        st.subheader("🔑 Passwort vergessen")
+
+        reset_email = st.text_input("Ihre Email:", key="reset_email")
+
+        if st.button("📧 Passwort-Reset anfordern"):
+            if reset_email:
+                token = user_manager.request_password_reset(reset_email)
+
+                if token:
+                    st.success("✅ Passwort-Reset wurde angefordert!")
+                    st.info("**Info**: Der Administrator wurde per Email benachrichtigt und wird Ihnen ein neues Passwort zusenden.")
+
+                    # Benachrichtige Admins
+                    admins = user_manager.get_users_by_role("Administrator")
+                    for admin in admins:
+                        # TODO: Email an Admin senden
+                        pass
+
+                    st.code(f"Reset-Token (für Admin): {token[:16]}...")
+                else:
+                    st.error("❌ Email nicht gefunden")
+            else:
+                st.warning("⚠️ Bitte Email eingeben")
+
+    st.stop()  # Stoppe hier wenn nicht eingeloggt
+
+# ============================================================================
+# HAUPT-APP (Nur für eingeloggte Benutzer)
+# ============================================================================
+
+current_user = st.session_state.current_user
+
+# Header mit Benutzer-Info
+col_h1, col_h2, col_h3 = st.columns([3, 1, 1])
+
+with col_h1:
+    st.title("📄 RHM | Automatisierter Posteingang")
+    st.caption(f"Version {VERSION}")
+
+with col_h2:
+    st.metric("Benutzer", current_user['name'])
+    st.caption(f"Rolle: {current_user['role']}")
+
+with col_h3:
+    st.write("")  # Spacing
+    if st.button("🚪 Logout", use_container_width=True):
+        user_manager.logout(st.session_state.session_token)
+        st.session_state.session_token = None
+        st.session_state.current_user = None
+        st.rerun()
+
+st.markdown("---")
+
+# Browser-Benachrichtigungen aktivieren (beim ersten Login)
+if not current_user.get('browser_notifications_enabled'):
+    with st.expander("🔔 Browser-Benachrichtigungen aktivieren (empfohlen)", expanded=True):
+        st.info("""
+        **Aktivieren Sie Browser-Benachrichtigungen**, um bei neuem Posteingang
+        sofort informiert zu werden - auch wenn Sie die App nicht geöffnet haben!
+        """)
+
+        # JavaScript für Notification-Request
+        st.components.v1.html(browser_notif.get_browser_support_script(), height=0)
+
+        if st.button("✅ Benachrichtigungen aktivieren", type="primary"):
+            # In Produktion: JavaScript-Callback für Push-Subscription
+            user_manager.update_browser_notification_settings(current_user['id'], True)
+            current_user['browser_notifications_enabled'] = True
+            st.success("✅ Browser-Benachrichtigungen aktiviert!")
+            st.rerun()
 
 # Initialisiere Trash-Manager
 if 'trash_manager' not in st.session_state:
