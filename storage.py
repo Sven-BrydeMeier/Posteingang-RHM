@@ -229,3 +229,53 @@ class PersistentStorage:
             'count': len(df),
             'last_modified': self.aktenregister_file.stat().st_mtime
         }
+
+    # ==================== DOKUMENTE ====================
+
+    def save_document(self, document_data: Dict) -> None:
+        """
+        Speichert Dokument-Metadaten
+
+        Args:
+            document_data: Dict mit Dokument-Informationen
+        """
+        documents_file = self.storage_dir / 'documents.json'
+
+        # Lade vorhandene Dokumente
+        documents = []
+        if documents_file.exists():
+            try:
+                with open(documents_file, 'r', encoding='utf-8') as f:
+                    documents = json.load(f)
+            except:
+                documents = []
+
+        # Füge neues Dokument hinzu
+        documents.append(document_data)
+
+        # Speichere
+        with open(documents_file, 'w', encoding='utf-8') as f:
+            json.dump(documents, f, ensure_ascii=False, indent=2)
+
+    def get_all_documents(self) -> list:
+        """
+        Liefert alle gespeicherten Dokumente
+
+        Returns:
+            Liste von Dokument-Dicts
+        """
+        documents_file = self.storage_dir / 'documents.json'
+
+        if not documents_file.exists():
+            return []
+
+        try:
+            with open(documents_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return []
+
+    def clear_documents(self) -> None:
+        """Löscht alle Dokumente"""
+        documents_file = self.storage_dir / 'documents.json'
+        documents_file.unlink(missing_ok=True)
