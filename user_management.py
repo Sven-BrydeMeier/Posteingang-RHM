@@ -16,7 +16,15 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
-import bcrypt
+
+# bcrypt optional - Fallback auf SHA256 wenn nicht verfügbar
+try:
+    import bcrypt
+    BCRYPT_AVAILABLE = True
+except ImportError:
+    BCRYPT_AVAILABLE = False
+    print("⚠️ bcrypt nicht installiert - verwende SHA256 (weniger sicher!)")
+    print("   Installiere mit: pip install bcrypt")
 
 
 class UserRole(Enum):
@@ -163,23 +171,26 @@ class UserManager:
         print("   ⚠️ BITTE BEIDE PASSWÖRTER SOFORT ÄNDERN!")
 
     def _hash_password(self, password: str) -> str:
-        """Hasht Passwort mit bcrypt"""
-        try:
-            # bcrypt
+        """Hasht Passwort mit bcrypt (oder SHA256 als Fallback)"""
+        if BCRYPT_AVAILABLE:
+            # bcrypt (sicher)
             salt = bcrypt.gensalt()
             hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
             return hashed.decode('utf-8')
-        except ImportError:
+        else:
             # Fallback: SHA256 (NICHT SICHER für Produktion!)
-            print("⚠️ bcrypt nicht installiert - verwende SHA256 (unsicher!)")
             return hashlib.sha256(password.encode()).hexdigest()
 
     def _verify_password(self, password: str, hashed: str) -> bool:
         """Verifiziert Passwort"""
-        try:
-            return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
-        except:
-            # Fallback
+        if BCRYPT_AVAILABLE and hashed.startswith('$2'):
+            # bcrypt hash (erkennbar an $2a/$2b/$2y prefix)
+            try:
+                return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+            except:
+                return False
+        else:
+            # SHA256 Fallback
             return hashlib.sha256(password.encode()).hexdigest() == hashed
 
     def create_user(
