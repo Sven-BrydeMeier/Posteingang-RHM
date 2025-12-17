@@ -316,6 +316,30 @@ class AktenzeichenErkenner:
                         such_text += " " + lines[i + offset]
 
                 # Erweiterte Regex: Unterstützt verschiedene Formate
+                # Prüfe ZUERST auf erweiterte Formate (mit Bereich + Reno)
+                erweitert_patterns = [
+                    r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)(\d{2})/([A-Z]{2,3})\b',  # 111/24SQ09/BO
+                    r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)(\d{2})([A-Z]{2,3})\b',   # 111/24SQ08BO
+                ]
+
+                for pattern in erweitert_patterns:
+                    erweitert_match = re.search(pattern, such_text, re.IGNORECASE)
+                    if erweitert_match:
+                        zahl1, zahl2, kuerzel, bereich, reno = erweitert_match.groups()
+                        stamm = f"{zahl1}/{zahl2.zfill(2)}"
+                        kuerzel = kuerzel.upper()
+                        kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
+
+                        return {
+                            'internes_az': f"{stamm}{kuerzel_norm}",
+                            'stamm': stamm,
+                            'kuerzel': kuerzel_norm,
+                            'bereich': bereich,
+                            'reno': reno.upper(),
+                            'quelle': 'zeichen_feld_erweitert'
+                        }
+
+                # Falls keine erweiterten Formate gefunden, suche Standard-Formate
                 # Format 1: 12345/01 oder 12345/1 (Standard)
                 # Format 2: 12345-01 oder 12345-1 (Bindestrich)
                 # Format 3: 12345.01 oder 12345.1 (Punkt)
@@ -362,9 +386,16 @@ class AktenzeichenErkenner:
         r"""
         Sucht nach Vollmustern: \d{1,5}/\d{2}(SQ|M|MQ|TS|FÜ|CV)...
         Unterstützt verschiedene Trennzeichen: / - .
+        Erkennt auch erweiterte Formate mit Bereich und Reno-Kürzel:
+        - 111/24SQ09/BO (mit Schrägstrich vor Reno)
+        - 111/24SQ08BO (ohne Schrägstrich vor Reno)
         """
         # Patterns für verschiedene Formate
         patterns = [
+            # Erweiterte Formate mit Bereich + Reno (Gerichtsvollzieher/Mahngericht)
+            r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)(\d{2})/([A-Z]{2,3})\b',  # 111/24SQ09/BO
+            r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)(\d{2})([A-Z]{2,3})\b',   # 111/24SQ08BO
+            # Standard-Formate
             r'\b(\d{1,5})[/](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)\b',  # 12345/01SQ
             r'\b(\d{1,5})[-](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)\b',  # 12345-01SQ
             r'\b(\d{1,5})[.](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)\b',  # 12345.01SQ
@@ -374,18 +405,39 @@ class AktenzeichenErkenner:
             matches = re.findall(pattern, text, re.IGNORECASE)
             if matches:
                 # Nehme ersten Match
-                zahl1, zahl2, kuerzel = matches[0]
-                # Normalisiere zu Slash-Format mit gepaddetem Jahr
-                stamm = f"{zahl1}/{zahl2.zfill(2)}"
-                kuerzel = kuerzel.upper()
-                kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
+                match_data = matches[0]
 
-                return {
-                    'internes_az': f"{stamm}{kuerzel_norm}",
-                    'stamm': stamm,
-                    'kuerzel': kuerzel_norm,
-                    'quelle': 'vollmuster'
-                }
+                # Erweiterte Formate mit Bereich + Reno (5 Gruppen)
+                if len(match_data) == 5:
+                    zahl1, zahl2, kuerzel, bereich, reno = match_data
+                    # Normalisiere zu Slash-Format mit gepaddetem Jahr
+                    stamm = f"{zahl1}/{zahl2.zfill(2)}"
+                    kuerzel = kuerzel.upper()
+                    kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
+
+                    return {
+                        'internes_az': f"{stamm}{kuerzel_norm}",
+                        'stamm': stamm,
+                        'kuerzel': kuerzel_norm,
+                        'bereich': bereich,
+                        'reno': reno.upper(),
+                        'quelle': 'vollmuster_erweitert'
+                    }
+
+                # Standard-Formate (3 Gruppen)
+                else:
+                    zahl1, zahl2, kuerzel = match_data
+                    # Normalisiere zu Slash-Format mit gepaddetem Jahr
+                    stamm = f"{zahl1}/{zahl2.zfill(2)}"
+                    kuerzel = kuerzel.upper()
+                    kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
+
+                    return {
+                        'internes_az': f"{stamm}{kuerzel_norm}",
+                        'stamm': stamm,
+                        'kuerzel': kuerzel_norm,
+                        'quelle': 'vollmuster'
+                    }
 
         return None
 
