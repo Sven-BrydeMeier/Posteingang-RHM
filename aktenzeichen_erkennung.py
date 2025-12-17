@@ -160,9 +160,19 @@ class AktenzeichenErkenner:
         'versicherungsnummer', 'kundennummer'
     ]
 
-    def __init__(self, excel_path: Path):
-        """Lädt das Aktenregister"""
+    def __init__(self, excel_path: Path, storage=None):
+        """
+        Lädt das Aktenregister und benutzerdefinierte Kürzel.
+
+        Args:
+            excel_path: Pfad zum Aktenregister
+            storage: PersistentStorage-Instanz für benutzerdefinierte Kürzel (optional)
+        """
         self.akten_register = self._lade_aktenregister(excel_path)
+        self.storage = storage
+
+        # Lade benutzerdefinierte Kürzel und erweitere die Kürzel-Listen
+        self._load_custom_kuerzel()
 
     def _lade_aktenregister(self, excel_path: Path) -> pd.DataFrame:
         """Lädt aktenregister.xlsx, Blatt 'akten'"""
@@ -197,6 +207,71 @@ class AktenzeichenErkenner:
             df['SB'] = df['SB'].replace('FU', 'FÜ')
 
         return df
+
+    def _load_custom_kuerzel(self) -> None:
+        """
+        Lädt benutzerdefinierte Kürzel aus dem Storage und erweitert die Kürzel-Listen.
+        """
+        if not self.storage:
+            return
+
+        try:
+            custom_kuerzel = self.storage.get_custom_kuerzel()
+
+            for kuerzel, data in custom_kuerzel.items():
+                kuerzel_upper = kuerzel.upper()
+
+                # Füge zur KUERZEL Liste hinzu (wenn nicht schon vorhanden)
+                if kuerzel_upper not in self.KUERZEL:
+                    self.KUERZEL.append(kuerzel_upper)
+
+                # Füge zur KUERZEL_NORMALISIERT hinzu
+                if kuerzel_upper not in self.KUERZEL_NORMALISIERT:
+                    self.KUERZEL_NORMALISIERT[kuerzel_upper] = kuerzel_upper
+
+                # Füge Namen-Mapping hinzu
+                name_lower = data['name'].lower()
+                if name_lower not in self.SACHBEARBEITER_NAMEN:
+                    self.SACHBEARBEITER_NAMEN[name_lower] = kuerzel_upper
+
+                # Füge auch Varianten ohne Umlaute hinzu
+                name_without_umlauts = (name_lower
+                    .replace('ä', 'ae')
+                    .replace('ö', 'oe')
+                    .replace('ü', 'ue')
+                    .replace('ß', 'ss'))
+
+                if name_without_umlauts != name_lower and name_without_umlauts not in self.SACHBEARBEITER_NAMEN:
+                    self.SACHBEARBEITER_NAMEN[name_without_umlauts] = kuerzel_upper
+
+        except Exception as e:
+            print(f"⚠️ Fehler beim Laden benutzerdefinierter Kürzel: {e}")
+
+    def get_all_kuerzel_regex(self) -> str:
+        """
+        Generiert einen Regex-String mit allen Kürzeln (statisch + dynamisch).
+
+        Returns:
+            String wie "MQ|SQ|TS|CV|..." für Verwendung in Regex
+        """
+        return '|'.join(self.KUERZEL)
+
+    def _get_patterns_erweitert(self):
+        """Generiert erweiterte Patterns dynamisch mit allen Kürzeln."""
+        kuerzel_regex = self.get_all_kuerzel_regex()
+        return [
+            rf'\b(\d{{1,5}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})/([A-Z]{{2,3}})\b',  # 111/24SQ09/BO
+            rf'\b(\d{{1,5}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})([A-Z]{{2,3}})\b',   # 111/24SQ08BO
+        ]
+
+    def _get_patterns_standard(self):
+        """Generiert Standard-Patterns dynamisch mit allen Kürzeln."""
+        kuerzel_regex = self.get_all_kuerzel_regex()
+        return [
+            rf'\b(\d{{1,5}})[/](\d{{1,2}})({kuerzel_regex})\b',  # 12345/01SQ
+            rf'\b(\d{{1,5}})[-](\d{{1,2}})({kuerzel_regex})\b',  # 12345-01SQ
+            rf'\b(\d{{1,5}})[.](\d{{1,2}})({kuerzel_regex})\b',  # 12345.01SQ
+        ]
 
     def erkenne_sachbearbeiter_aus_text(self, text: str) -> Optional[str]:
         """
@@ -368,10 +443,7 @@ class AktenzeichenErkenner:
 
                 # Erweiterte Regex: Unterstützt verschiedene Formate
                 # Prüfe ZUERST auf erweiterte Formate (mit Bereich + Reno)
-                erweitert_patterns = [
-                    r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)(\d{2})/([A-Z]{2,3})\b',  # 111/24SQ09/BO
-                    r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)(\d{2})([A-Z]{2,3})\b',   # 111/24SQ08BO
-                ]
+                erweitert_patterns = self._get_patterns_erweitert()
 
                 for pattern in erweitert_patterns:
                     erweitert_match = re.search(pattern, such_text, re.IGNORECASE)
@@ -441,16 +513,8 @@ class AktenzeichenErkenner:
         - 111/24SQ09/BO (mit Schrägstrich vor Reno)
         - 111/24SQ08BO (ohne Schrägstrich vor Reno)
         """
-        # Patterns für verschiedene Formate
-        patterns = [
-            # Erweiterte Formate mit Bereich + Reno (Gerichtsvollzieher/Mahngericht)
-            r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)(\d{2})/([A-Z]{2,3})\b',  # 111/24SQ09/BO
-            r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)(\d{2})([A-Z]{2,3})\b',   # 111/24SQ08BO
-            # Standard-Formate
-            r'\b(\d{1,5})[/](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)\b',  # 12345/01SQ
-            r'\b(\d{1,5})[-](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)\b',  # 12345-01SQ
-            r'\b(\d{1,5})[.](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)\b',  # 12345.01SQ
-        ]
+        # Patterns für verschiedene Formate (dynamisch generiert)
+        patterns = self._get_patterns_erweitert() + self._get_patterns_standard()
 
         for pattern in patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)

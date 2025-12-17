@@ -279,3 +279,123 @@ class PersistentStorage:
         """Löscht alle Dokumente"""
         documents_file = self.storage_dir / 'documents.json'
         documents_file.unlink(missing_ok=True)
+
+    # ===== Kürzel-Verwaltung =====
+
+    def get_custom_kuerzel(self) -> Dict[str, str]:
+        """
+        Lädt benutzerdefinierte Kürzel aus der Datei.
+
+        Returns:
+            Dict mit Kürzel -> Name Mapping
+        """
+        kuerzel_file = self.storage_dir / 'custom_kuerzel.json'
+        if not kuerzel_file.exists():
+            return {}
+
+        try:
+            with open(kuerzel_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return {}
+
+    def save_custom_kuerzel(self, kuerzel_dict: Dict[str, str]) -> None:
+        """
+        Speichert benutzerdefinierte Kürzel.
+
+        Args:
+            kuerzel_dict: Dict mit Kürzel -> Name Mapping
+        """
+        kuerzel_file = self.storage_dir / 'custom_kuerzel.json'
+        with open(kuerzel_file, 'w', encoding='utf-8') as f:
+            json.dump(kuerzel_dict, f, ensure_ascii=False, indent=2)
+
+    def add_kuerzel(self, kuerzel: str, name: str, category: str = "Mitarbeiter") -> bool:
+        """
+        Fügt ein neues Kürzel hinzu.
+
+        Args:
+            kuerzel: Das Kürzel (z.B. "GO")
+            name: Der Name (z.B. "Goeser")
+            category: Kategorie (z.B. "Mitarbeiter", "Rechtsanwalt", "Notar")
+
+        Returns:
+            True bei Erfolg
+        """
+        kuerzel = kuerzel.upper().strip()
+        name = name.strip()
+
+        # Validierung
+        if not kuerzel or not name:
+            return False
+
+        if len(kuerzel) > 3:
+            return False
+
+        # Lade bestehende Kürzel
+        kuerzel_dict = self.get_custom_kuerzel()
+
+        # Füge neues Kürzel hinzu
+        kuerzel_dict[kuerzel] = {
+            'name': name,
+            'category': category,
+            'created_at': pd.Timestamp.now().isoformat()
+        }
+
+        # Speichern
+        self.save_custom_kuerzel(kuerzel_dict)
+        return True
+
+    def update_kuerzel(self, kuerzel: str, name: str, category: str) -> bool:
+        """
+        Aktualisiert ein bestehendes Kürzel.
+
+        Args:
+            kuerzel: Das Kürzel (z.B. "GO")
+            name: Der neue Name
+            category: Die neue Kategorie
+
+        Returns:
+            True bei Erfolg
+        """
+        kuerzel = kuerzel.upper().strip()
+        kuerzel_dict = self.get_custom_kuerzel()
+
+        if kuerzel not in kuerzel_dict:
+            return False
+
+        kuerzel_dict[kuerzel]['name'] = name.strip()
+        kuerzel_dict[kuerzel]['category'] = category
+        kuerzel_dict[kuerzel]['updated_at'] = pd.Timestamp.now().isoformat()
+
+        self.save_custom_kuerzel(kuerzel_dict)
+        return True
+
+    def delete_kuerzel(self, kuerzel: str) -> bool:
+        """
+        Löscht ein Kürzel.
+
+        Args:
+            kuerzel: Das zu löschende Kürzel
+
+        Returns:
+            True bei Erfolg
+        """
+        kuerzel = kuerzel.upper().strip()
+        kuerzel_dict = self.get_custom_kuerzel()
+
+        if kuerzel not in kuerzel_dict:
+            return False
+
+        del kuerzel_dict[kuerzel]
+        self.save_custom_kuerzel(kuerzel_dict)
+        return True
+
+    def get_all_kuerzel_with_names(self) -> Dict[str, Dict[str, str]]:
+        """
+        Gibt alle Kürzel mit Namen und Kategorien zurück.
+
+        Returns:
+            Dict mit Kürzel -> {name, category} Mapping
+        """
+        return self.get_custom_kuerzel()

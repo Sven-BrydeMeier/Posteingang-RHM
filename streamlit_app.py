@@ -877,6 +877,51 @@ if current_user['role'] in ['Administrator', 'Empfang']:
             else:
                 st.warning("⚠️ Alle Felder ausfüllen")
 
+    # Kürzel-Verwaltung
+    with st.sidebar.expander("🏷️ Kürzel verwalten"):
+        st.caption("Kürzel für neue Mitarbeiter, Rechtsanwälte oder Notare hinzufügen")
+
+        # Bestehende Kürzel anzeigen
+        custom_kuerzel = storage.get_all_kuerzel_with_names()
+
+        if custom_kuerzel:
+            st.markdown("**Gespeicherte Kürzel:**")
+            for kuerzel, data in custom_kuerzel.items():
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.text(f"{kuerzel} → {data['name']} ({data.get('category', 'Mitarbeiter')})")
+                with col2:
+                    if st.button("❌", key=f"del_kuerzel_{kuerzel}", help=f"{kuerzel} löschen"):
+                        if storage.delete_kuerzel(kuerzel):
+                            st.success(f"✅ {kuerzel} gelöscht!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Fehler beim Löschen")
+
+        st.markdown("---")
+        st.markdown("**Neues Kürzel hinzufügen:**")
+
+        new_kuerzel = st.text_input("Kürzel (z.B. GO):", key="sidebar_new_kuerzel", max_chars=3)
+        new_name = st.text_input("Name:", key="sidebar_new_name")
+        new_category = st.selectbox("Kategorie:", [
+            "Mitarbeiter",
+            "Rechtsanwalt",
+            "Rechtsanwältin",
+            "Notar",
+            "Notarin"
+        ], key="sidebar_new_category")
+
+        if st.button("➕ Kürzel hinzufügen", key="sidebar_add_kuerzel"):
+            if new_kuerzel and new_name:
+                if storage.add_kuerzel(new_kuerzel.upper().strip(), new_name.strip(), new_category):
+                    st.success(f"✅ Kürzel {new_kuerzel.upper()} hinzugefügt!")
+                    st.info("ℹ️ Das neue Kürzel wird beim nächsten Upload verwendet.")
+                    st.rerun()
+                else:
+                    st.error("❌ Fehler beim Hinzufügen (max. 3 Zeichen)")
+            else:
+                st.warning("⚠️ Beide Felder ausfüllen")
+
     # Benutzer-Übersicht
     all_users = user_manager.get_all_users()
     active_users = [u for u in all_users if u.get('active', True)]
@@ -1139,7 +1184,7 @@ if st.button("🚀 Verarbeitung starten" if st.session_state.batch_count == 0 el
                         df = storage.load_aktenregister()
                         st.info(f"📂 Verwende gespeichertes Register: {len(df)} Akten")
 
-                    erkenner = AktenzeichenErkenner(excel_path)
+                    erkenner = AktenzeichenErkenner(excel_path, storage=storage)
 
                     # 2. PDF verarbeiten
                     status_text.text("📄 Analysiere PDF und trenne Dokumente...")
@@ -1721,7 +1766,7 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
                                 # Lade Register
                                 if storage.has_aktenregister():
                                     excel_path = storage.aktenregister_file
-                                    erkenner = AktenzeichenErkenner(excel_path)
+                                    erkenner = AktenzeichenErkenner(excel_path, storage=storage)
                                     register_info = erkenner._pruefe_register(manual_az)
 
                                     if register_info:
