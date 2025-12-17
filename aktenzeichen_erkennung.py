@@ -12,7 +12,7 @@ from datetime import datetime
 
 class AktenzeichenErkenner:
     # Kanzlei-Kürzel (MQ vor M, da MQ spezifischer)
-    KUERZEL = ['MQ', 'SQ', 'TS', 'CV', 'FÜ', 'FU', 'M']
+    KUERZEL = ['MQ', 'SQ', 'TS', 'CV', 'FÜ', 'FU', 'M', 'SÖ', 'GO']
     KUERZEL_NORMALISIERT = {
         'MQ': 'M',  # MQ = M (RAin Marquardsen)
         'FU': 'FÜ',  # FU = FÜ
@@ -20,7 +20,9 @@ class AktenzeichenErkenner:
         'SQ': 'SQ',
         'TS': 'TS',
         'CV': 'CV',
-        'M': 'M'
+        'M': 'M',
+        'SÖ': 'SÖ',  # Stöcken
+        'GO': 'GO'   # Goeser
     }
 
     # Sachbearbeiter-Namen zu Kürzel Mapping (alle Variationen inkl. OCR-Fehler)
@@ -81,7 +83,15 @@ class AktenzeichenErkenner:
         'christian': 'CV',
         'christian ostertun': 'CV',
         'christian_ostertun': 'CV',  # OCR: Unterstrich
-        'vollbrecht': 'CV'  # Alternative Name
+        'vollbrecht': 'CV',  # Alternative Name
+
+        # SÖ = Stöcken
+        'stöcken': 'SÖ',
+        'stoecken': 'SÖ',  # Umlaute-Alternative
+
+        # GO = Goeser
+        'goeser': 'GO',
+        'göser': 'GO'  # Umlaute-Alternative
     }
 
     # Titel-Variationen (für erweiterte Suche)
@@ -318,8 +328,8 @@ class AktenzeichenErkenner:
                 # Erweiterte Regex: Unterstützt verschiedene Formate
                 # Prüfe ZUERST auf erweiterte Formate (mit Bereich + Reno)
                 erweitert_patterns = [
-                    r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)(\d{2})/([A-Z]{2,3})\b',  # 111/24SQ09/BO
-                    r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)(\d{2})([A-Z]{2,3})\b',   # 111/24SQ08BO
+                    r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)(\d{2})/([A-Z]{2,3})\b',  # 111/24SQ09/BO
+                    r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)(\d{2})([A-Z]{2,3})\b',   # 111/24SQ08BO
                 ]
 
                 for pattern in erweitert_patterns:
@@ -393,12 +403,12 @@ class AktenzeichenErkenner:
         # Patterns für verschiedene Formate
         patterns = [
             # Erweiterte Formate mit Bereich + Reno (Gerichtsvollzieher/Mahngericht)
-            r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)(\d{2})/([A-Z]{2,3})\b',  # 111/24SQ09/BO
-            r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)(\d{2})([A-Z]{2,3})\b',   # 111/24SQ08BO
+            r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)(\d{2})/([A-Z]{2,3})\b',  # 111/24SQ09/BO
+            r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)(\d{2})([A-Z]{2,3})\b',   # 111/24SQ08BO
             # Standard-Formate
-            r'\b(\d{1,5})[/](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)\b',  # 12345/01SQ
-            r'\b(\d{1,5})[-](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)\b',  # 12345-01SQ
-            r'\b(\d{1,5})[.](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M)\b',  # 12345.01SQ
+            r'\b(\d{1,5})[/](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)\b',  # 12345/01SQ
+            r'\b(\d{1,5})[-](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)\b',  # 12345-01SQ
+            r'\b(\d{1,5})[.](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)\b',  # 12345.01SQ
         ]
 
         for pattern in patterns:
