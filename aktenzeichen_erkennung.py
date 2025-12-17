@@ -11,18 +11,26 @@ from datetime import datetime
 
 
 class AktenzeichenErkenner:
-    # Kanzlei-Kürzel (MQ vor M, da MQ spezifischer)
-    KUERZEL = ['MQ', 'SQ', 'TS', 'CV', 'FÜ', 'FU', 'M', 'SÖ', 'GO']
+    # Kanzlei-Kürzel (MQ vor M, da MQ spezifischer; TS vor ST wegen höherer Priorität)
+    KUERZEL = ['MQ', 'SQ', 'TS', 'CV', 'FÜ', 'FU', 'M', 'GO', 'HE', 'RÜ', 'AK', 'TÖ', 'LI', 'AD', 'HI', 'FK', 'ST']
     KUERZEL_NORMALISIERT = {
         'MQ': 'M',  # MQ = M (RAin Marquardsen)
         'FU': 'FÜ',  # FU = FÜ
         'FÜ': 'FÜ',
         'SQ': 'SQ',
-        'TS': 'TS',
+        'TS': 'TS',  # Tamara Meyer
         'CV': 'CV',
         'M': 'M',
-        'SÖ': 'SÖ',  # Stöcken
-        'GO': 'GO'   # Goeser
+        'GO': 'GO',  # Goeser
+        'HE': 'HE',  # Herberg
+        'RÜ': 'RÜ',  # Korinna Rückborn
+        'AK': 'AK',  # Akkoc
+        'TÖ': 'TÖ',  # Tönjes
+        'LI': 'LI',  # Litzenroth
+        'AD': 'AD',  # Abdul Al
+        'HI': 'HI',  # Hingst
+        'FK': 'FK',  # Kaya
+        'ST': 'ST'   # Stöcken
     }
 
     # Sachbearbeiter-Namen zu Kürzel Mapping (alle Variationen inkl. OCR-Fehler)
@@ -85,13 +93,46 @@ class AktenzeichenErkenner:
         'christian_ostertun': 'CV',  # OCR: Unterstrich
         'vollbrecht': 'CV',  # Alternative Name
 
-        # SÖ = Stöcken
-        'stöcken': 'SÖ',
-        'stoecken': 'SÖ',  # Umlaute-Alternative
-
         # GO = Goeser
         'goeser': 'GO',
-        'göser': 'GO'  # Umlaute-Alternative
+        'göser': 'GO',  # Umlaute-Alternative
+
+        # HE = Herberg
+        'herberg': 'HE',
+
+        # RÜ = Korinna Rückborn
+        'rückborn': 'RÜ',
+        'rueckborn': 'RÜ',  # Umlaute-Alternative
+        'korinna': 'RÜ',
+        'korinna rückborn': 'RÜ',
+        'korinna rueckborn': 'RÜ',
+        'korinna_rückborn': 'RÜ',  # OCR: Unterstrich
+        'korinna_rueckborn': 'RÜ',
+
+        # AK = Akkoc
+        'akkoc': 'AK',
+
+        # TÖ = Tönjes
+        'tönjes': 'TÖ',
+        'toenjes': 'TÖ',  # Umlaute-Alternative
+
+        # LI = Litzenroth
+        'litzenroth': 'LI',
+
+        # AD = Abdul Al
+        'abdul': 'AD',
+        'abdul al': 'AD',
+        'abdul_al': 'AD',  # OCR: Unterstrich
+
+        # HI = Hingst
+        'hingst': 'HI',
+
+        # FK = Kaya
+        'kaya': 'FK',
+
+        # ST = Stöcken
+        'stöcken': 'ST',
+        'stoecken': 'ST'  # Umlaute-Alternative
     }
 
     # Titel-Variationen (für erweiterte Suche)
@@ -328,8 +369,8 @@ class AktenzeichenErkenner:
                 # Erweiterte Regex: Unterstützt verschiedene Formate
                 # Prüfe ZUERST auf erweiterte Formate (mit Bereich + Reno)
                 erweitert_patterns = [
-                    r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)(\d{2})/([A-Z]{2,3})\b',  # 111/24SQ09/BO
-                    r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)(\d{2})([A-Z]{2,3})\b',   # 111/24SQ08BO
+                    r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)(\d{2})/([A-Z]{2,3})\b',  # 111/24SQ09/BO
+                    r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)(\d{2})([A-Z]{2,3})\b',   # 111/24SQ08BO
                 ]
 
                 for pattern in erweitert_patterns:
@@ -403,12 +444,12 @@ class AktenzeichenErkenner:
         # Patterns für verschiedene Formate
         patterns = [
             # Erweiterte Formate mit Bereich + Reno (Gerichtsvollzieher/Mahngericht)
-            r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)(\d{2})/([A-Z]{2,3})\b',  # 111/24SQ09/BO
-            r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)(\d{2})([A-Z]{2,3})\b',   # 111/24SQ08BO
+            r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)(\d{2})/([A-Z]{2,3})\b',  # 111/24SQ09/BO
+            r'\b(\d{1,5})/(\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)(\d{2})([A-Z]{2,3})\b',   # 111/24SQ08BO
             # Standard-Formate
-            r'\b(\d{1,5})[/](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)\b',  # 12345/01SQ
-            r'\b(\d{1,5})[-](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)\b',  # 12345-01SQ
-            r'\b(\d{1,5})[.](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|SÖ|GO)\b',  # 12345.01SQ
+            r'\b(\d{1,5})[/](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)\b',  # 12345/01SQ
+            r'\b(\d{1,5})[-](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)\b',  # 12345-01SQ
+            r'\b(\d{1,5})[.](\d{1,2})(MQ|SQ|TS|CV|FÜ|FU|M|GO|HE|RÜ|AK|TÖ|LI|AD|HI|FK|ST)\b',  # 12345.01SQ
         ]
 
         for pattern in patterns:
