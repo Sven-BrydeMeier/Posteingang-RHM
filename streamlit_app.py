@@ -1254,7 +1254,8 @@ if st.button("🚀 Verarbeitung starten" if st.session_state.batch_count == 0 el
                             analyse.get('mandant'),
                             analyse.get('gegner'),
                             analyse.get('datum'),
-                            analyse.get('stichworte', [])
+                            analyse.get('stichworte', []),
+                            aktenkurzbezeichnung=akt_info.get('aktenkurzbezeichnung')
                         )
 
                         alle_daten.append({

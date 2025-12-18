@@ -151,7 +151,8 @@ class AktenzeichenErkenner:
         'ihr aktenzeichen', 'ihr aktenzeichen:', 'ihr-aktenzeichen',
         'dortiges aktenzeichen', 'dortiges aktenzeichen:',
         'verwendungszweck', 'verwendungszweck:',
-        'aktenzeichen:', 'az:', 'az.:'
+        'aktenzeichen:', 'az:', 'az.:',
+        'iz', 'iz:', 'iz.',  # Kurzform für "Ihr Zeichen"
     ]
 
     # Externe Aktenzeichen-Schlagwörter
@@ -453,7 +454,7 @@ class AktenzeichenErkenner:
                         kuerzel = kuerzel.upper()
                         kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
 
-                        return {
+                        result = {
                             'internes_az': f"{stamm}{kuerzel_norm}",
                             'stamm': stamm,
                             'kuerzel': kuerzel_norm,
@@ -461,6 +462,8 @@ class AktenzeichenErkenner:
                             'reno': reno.upper(),
                             'quelle': 'zeichen_feld_erweitert'
                         }
+                        # Reichere mit Register-Daten an (z.B. Aktenkurzbezeichnung)
+                        return self._anreichern_mit_register_daten(result)
 
                 # Falls keine erweiterten Formate gefunden, suche Standard-Formate
                 # Format 1: 12345/01 oder 12345/1 (Standard)
@@ -491,12 +494,14 @@ class AktenzeichenErkenner:
                         if kuerzel:
                             # Kürzel gefunden!
                             kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
-                            return {
+                            result = {
                                 'internes_az': f"{stamm}{kuerzel_norm}",
                                 'stamm': stamm,
                                 'kuerzel': kuerzel_norm,
                                 'quelle': 'zeichen_feld_mit_kuerzel'
                             }
+                            # Reichere mit Register-Daten an (z.B. Aktenkurzbezeichnung)
+                            return self._anreichern_mit_register_daten(result)
                         else:
                             # Kein Kürzel im Suffix → Register prüfen
                             register_info = self._pruefe_register(stamm)
@@ -530,7 +535,7 @@ class AktenzeichenErkenner:
                     kuerzel = kuerzel.upper()
                     kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
 
-                    return {
+                    result = {
                         'internes_az': f"{stamm}{kuerzel_norm}",
                         'stamm': stamm,
                         'kuerzel': kuerzel_norm,
@@ -538,6 +543,8 @@ class AktenzeichenErkenner:
                         'reno': reno.upper(),
                         'quelle': 'vollmuster_erweitert'
                     }
+                    # Reichere mit Register-Daten an
+                    return self._anreichern_mit_register_daten(result)
 
                 # Standard-Formate (3 Gruppen)
                 else:
@@ -547,12 +554,14 @@ class AktenzeichenErkenner:
                     kuerzel = kuerzel.upper()
                     kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
 
-                    return {
+                    result = {
                         'internes_az': f"{stamm}{kuerzel_norm}",
                         'stamm': stamm,
                         'kuerzel': kuerzel_norm,
                         'quelle': 'vollmuster'
                     }
+                    # Reichere mit Register-Daten an
+                    return self._anreichern_mit_register_daten(result)
 
         return None
 
@@ -589,10 +598,46 @@ class AktenzeichenErkenner:
 
         return None
 
+    def _anreichern_mit_register_daten(self, result: Dict) -> Dict:
+        """
+        Reichert ein Ergebnis mit Daten aus dem Register an (falls vorhanden).
+
+        Args:
+            result: Dict mit 'stamm' und 'kuerzel'
+
+        Returns:
+            Angereichertes Dict mit 'aktenkurzbezeichnung' (falls im Register gefunden)
+        """
+        if not result or 'stamm' not in result:
+            return result
+
+        stamm = result['stamm']
+
+        # Prüfe Register
+        if 'Akte' not in self.akten_register.columns:
+            return result
+
+        treffer = self.akten_register[self.akten_register['Akte'] == stamm]
+
+        if not treffer.empty:
+            row = treffer.iloc[0]
+
+            # Suche nach Aktenkurzbezeichnung
+            kurzbezeichnung_spalten = ['Kurzbezeichnung', 'Aktenkurzbezeichnung', 'Bez', 'Bezeichnung', 'KurzBez']
+
+            for spalte in kurzbezeichnung_spalten:
+                if spalte in self.akten_register.columns:
+                    wert = row.get(spalte)
+                    if pd.notna(wert) and str(wert).strip():
+                        result['aktenkurzbezeichnung'] = str(wert).strip()
+                        break
+
+        return result
+
     def _pruefe_register(self, stamm: str) -> Optional[Dict]:
         """
         Prüft, ob ein Stamm im Aktenregister existiert
-        Returns internes AZ = Akte + SB aus Register
+        Returns internes AZ = Akte + SB aus Register + Aktenkurzbezeichnung (falls vorhanden)
         """
         # Prüfe ob erforderliche Spalten vorhanden sind
         if 'Akte' not in self.akten_register.columns:
@@ -605,12 +650,29 @@ class AktenzeichenErkenner:
             sb = row.get('SB', 'nicht-zugeordnet')
             sb_norm = self.KUERZEL_NORMALISIERT.get(sb, sb)
 
-            return {
+            # Suche nach Aktenkurzbezeichnung in verschiedenen möglichen Spalten
+            aktenkurzbezeichnung = None
+            kurzbezeichnung_spalten = ['Kurzbezeichnung', 'Aktenkurzbezeichnung', 'Bez', 'Bezeichnung', 'KurzBez']
+
+            for spalte in kurzbezeichnung_spalten:
+                if spalte in self.akten_register.columns:
+                    wert = row.get(spalte)
+                    if pd.notna(wert) and str(wert).strip():
+                        aktenkurzbezeichnung = str(wert).strip()
+                        break
+
+            result = {
                 'internes_az': f"{stamm}{sb_norm}",
                 'stamm': stamm,
                 'kuerzel': sb_norm,
                 'register_data': row.to_dict()
             }
+
+            # Füge Aktenkurzbezeichnung hinzu, falls gefunden
+            if aktenkurzbezeichnung:
+                result['aktenkurzbezeichnung'] = aktenkurzbezeichnung
+
+            return result
 
         return None
 
@@ -689,10 +751,12 @@ class AktenzeichenErkenner:
 
     def generiere_dateiname(self, internes_az: Optional[str], mandant: Optional[str],
                            gegner: Optional[str], datum: Optional[str],
-                           stichworte: List[str]) -> str:
+                           stichworte: List[str], aktenkurzbezeichnung: Optional[str] = None) -> str:
         """
         Generiert Dateinamen nach Schema:
-        [Aktenzeichen]_[Mandant]_[Gegner]_[Datum]_[Stichworte].pdf
+        [Aktenzeichen]_[Aktenkurzbezeichnung]_[Mandant]_[Gegner]_[Datum]_[Stichworte].pdf
+
+        Aktenkurzbezeichnung wird nur eingefügt, falls im Register vorhanden.
         """
         teile = []
 
@@ -702,19 +766,23 @@ class AktenzeichenErkenner:
         else:
             teile.append("ohne-az")
 
-        # 2. Mandant
+        # 2. Aktenkurzbezeichnung (falls vorhanden)
+        if aktenkurzbezeichnung:
+            teile.append(self._bereinige_text(aktenkurzbezeichnung)[:30])
+
+        # 3. Mandant
         if mandant:
             teile.append(self._bereinige_text(mandant)[:30])
 
-        # 3. Gegner
+        # 4. Gegner
         if gegner:
             teile.append(self._bereinige_text(gegner)[:30])
 
-        # 4. Datum
+        # 5. Datum
         if datum:
             teile.append(self._bereinige_text(datum))
 
-        # 5. Stichworte (max 3)
+        # 6. Stichworte (max 3)
         if stichworte:
             stichworte_str = "_".join([self._bereinige_text(s) for s in stichworte[:3]])
             teile.append(stichworte_str[:40])
