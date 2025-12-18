@@ -258,20 +258,20 @@ class AktenzeichenErkenner:
         return '|'.join(self.KUERZEL)
 
     def _get_patterns_erweitert(self):
-        """Generiert erweiterte Patterns dynamisch mit allen Kürzeln."""
+        """Generiert erweiterte Patterns dynamisch mit allen Kürzeln. Unterstützt bis zu 7 Stellen."""
         kuerzel_regex = self.get_all_kuerzel_regex()
         return [
-            rf'\b(\d{{1,5}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})/([A-Z]{{2,3}})\b',  # 111/24SQ09/BO
-            rf'\b(\d{{1,5}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})([A-Z]{{2,3}})\b',   # 111/24SQ08BO
+            rf'\b(\d{{1,7}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})/([A-Z]{{2,3}})\b',  # 111/24SQ09/BO
+            rf'\b(\d{{1,7}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})([A-Z]{{2,3}})\b',   # 111/24SQ08BO
         ]
 
     def _get_patterns_standard(self):
-        """Generiert Standard-Patterns dynamisch mit allen Kürzeln."""
+        """Generiert Standard-Patterns dynamisch mit allen Kürzeln. Unterstützt bis zu 7 Stellen."""
         kuerzel_regex = self.get_all_kuerzel_regex()
         return [
-            rf'\b(\d{{1,5}})[/](\d{{1,2}})({kuerzel_regex})\b',  # 12345/01SQ
-            rf'\b(\d{{1,5}})[-](\d{{1,2}})({kuerzel_regex})\b',  # 12345-01SQ
-            rf'\b(\d{{1,5}})[.](\d{{1,2}})({kuerzel_regex})\b',  # 12345.01SQ
+            rf'\b(\d{{1,7}})[/](\d{{1,2}})({kuerzel_regex})\b',  # 12345/01SQ
+            rf'\b(\d{{1,7}})[-](\d{{1,2}})({kuerzel_regex})\b',  # 12345-01SQ
+            rf'\b(\d{{1,7}})[.](\d{{1,2}})({kuerzel_regex})\b',  # 12345.01SQ
         ]
 
     def erkenne_sachbearbeiter_aus_text(self, text: str) -> Optional[str]:
@@ -426,8 +426,8 @@ class AktenzeichenErkenner:
         Sucht nach Aktenzeichen in "Ihr Zeichen / Unser Zeichen" etc. Zeilen
         Höchste Priorität!
 
-        Erweitert: Durchsucht bis zu 3 Zeilen nach dem Keyword und
-        unterstützt verschiedene Aktenzeichen-Formate
+        Erweitert: Durchsucht 2 Zeilen VOR und 2 Zeilen NACH dem Keyword
+        sowie die gleiche Zeile (insgesamt 5 Zeilen Kontext)
         """
         lines = text.split('\n')
 
@@ -436,11 +436,21 @@ class AktenzeichenErkenner:
 
             # Prüfe, ob Zeile ein Zeichen-Keyword enthält
             if any(kw in line_lower for kw in self.ZEICHEN_KEYWORDS):
-                # Suche in dieser und den nächsten 2 Zeilen (wegen Umbruch)
-                such_text = line
-                for offset in range(1, 3):  # Nächste 2 Zeilen
+                # Suche in den 2 Zeilen VOR, der aktuellen Zeile, und den 2 Zeilen NACH dem Keyword
+                such_text = ""
+
+                # 2 Zeilen vorher
+                for offset in range(2, 0, -1):
+                    if i - offset >= 0:
+                        such_text += lines[i - offset] + " "
+
+                # Aktuelle Zeile
+                such_text += line + " "
+
+                # 2 Zeilen nachher
+                for offset in range(1, 3):
                     if i + offset < len(lines):
-                        such_text += " " + lines[i + offset]
+                        such_text += lines[i + offset] + " "
 
                 # Erweiterte Regex: Unterstützt verschiedene Formate
                 # Prüfe ZUERST auf erweiterte Formate (mit Bereich + Reno)
@@ -466,13 +476,13 @@ class AktenzeichenErkenner:
                         return self._anreichern_mit_register_daten(result)
 
                 # Falls keine erweiterten Formate gefunden, suche Standard-Formate
-                # Format 1: 12345/01 oder 12345/1 (Standard)
-                # Format 2: 12345-01 oder 12345-1 (Bindestrich)
-                # Format 3: 12345.01 oder 12345.1 (Punkt)
+                # Format 1: 1234567/01 oder 1234567/1 (Standard, bis zu 7 Stellen)
+                # Format 2: 1234567-01 oder 1234567-1 (Bindestrich)
+                # Format 3: 1234567.01 oder 1234567.1 (Punkt)
                 stamm_patterns = [
-                    r'\b(\d{1,5})[/](\d{1,2})\b',  # 12345/01
-                    r'\b(\d{1,5})[-](\d{1,2})\b',  # 12345-01
-                    r'\b(\d{1,5})[.](\d{1,2})\b',  # 12345.01
+                    r'\b(\d{1,7})[/](\d{1,2})\b',  # 1234567/01
+                    r'\b(\d{1,7})[-](\d{1,2})\b',  # 1234567-01
+                    r'\b(\d{1,7})[.](\d{1,2})\b',  # 1234567.01
                 ]
 
                 for pattern in stamm_patterns:
@@ -569,12 +579,13 @@ class AktenzeichenErkenner:
         """
         Sucht nach Stämmen und prüft gegen Aktenregister
         Unterstützt verschiedene Formate: / - .
+        Unterstützt bis zu 7 Stellen vor dem Jahr (z.B. 1234567/25)
         """
         # Patterns für verschiedene Formate
         patterns = [
-            r'\b(\d{1,5})[/](\d{1,2})\b',  # 12345/01
-            r'\b(\d{1,5})[-](\d{1,2})\b',  # 12345-01
-            r'\b(\d{1,5})[.](\d{1,2})\b',  # 12345.01
+            r'\b(\d{1,7})[/](\d{1,2})\b',  # 1234567/01
+            r'\b(\d{1,7})[-](\d{1,2})\b',  # 1234567-01
+            r'\b(\d{1,7})[.](\d{1,2})\b',  # 1234567.01
         ]
 
         gefundene_staemme = set()  # Vermeide Duplikate
