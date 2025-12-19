@@ -258,20 +258,18 @@ class AktenzeichenErkenner:
         return '|'.join(self.KUERZEL)
 
     def _get_patterns_erweitert(self):
-        """Generiert erweiterte Patterns dynamisch mit allen Kürzeln. Unterstützt bis zu 7 Stellen."""
+        """Generiert erweiterte Patterns dynamisch mit allen Kürzeln. Unterstützt 1-4 Stellen."""
         kuerzel_regex = self.get_all_kuerzel_regex()
         return [
-            rf'\b(\d{{1,7}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})/([A-Z]{{2,3}})\b',  # 111/24SQ09/BO
-            rf'\b(\d{{1,7}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})([A-Z]{{2,3}})\b',   # 111/24SQ08BO
+            rf'\b(\d{{1,4}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})/([A-Z]{{2,3}})\b',  # 111/24SQ09/BO
+            rf'\b(\d{{1,4}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})([A-Z]{{2,3}})\b',   # 111/24SQ08BO
         ]
 
     def _get_patterns_standard(self):
-        """Generiert Standard-Patterns dynamisch mit allen Kürzeln. Unterstützt bis zu 7 Stellen."""
+        """Generiert Standard-Patterns dynamisch mit allen Kürzeln. Unterstützt 1-4 Stellen."""
         kuerzel_regex = self.get_all_kuerzel_regex()
         return [
-            rf'\b(\d{{1,7}})[/](\d{{1,2}})({kuerzel_regex})\b',  # 12345/01SQ
-            rf'\b(\d{{1,7}})[-](\d{{1,2}})({kuerzel_regex})\b',  # 12345-01SQ
-            rf'\b(\d{{1,7}})[.](\d{{1,2}})({kuerzel_regex})\b',  # 12345.01SQ
+            rf'\b(\d{{1,4}})[/](\d{{1,2}})({kuerzel_regex})\b',  # 1234/01SQ
         ]
 
     def erkenne_sachbearbeiter_aus_text(self, text: str) -> Optional[str]:
@@ -476,13 +474,9 @@ class AktenzeichenErkenner:
                         return self._anreichern_mit_register_daten(result)
 
                 # Falls keine erweiterten Formate gefunden, suche Standard-Formate
-                # Format 1: 1234567/01 oder 1234567/1 (Standard, bis zu 7 Stellen)
-                # Format 2: 1234567-01 oder 1234567-1 (Bindestrich)
-                # Format 3: 1234567.01 oder 1234567.1 (Punkt)
+                # Format: 1234/01 oder 1234/1 (Standard, 1-4 Stellen, nur Schrägstrich)
                 stamm_patterns = [
-                    r'\b(\d{1,7})[/](\d{1,2})\b',  # 1234567/01
-                    r'\b(\d{1,7})[-](\d{1,2})\b',  # 1234567-01
-                    r'\b(\d{1,7})[.](\d{1,2})\b',  # 1234567.01
+                    r'\b(\d{1,4})[/](\d{1,2})\b',  # 1234/01
                 ]
 
                 for pattern in stamm_patterns:
@@ -522,8 +516,8 @@ class AktenzeichenErkenner:
 
     def _suche_vollmuster(self, text: str) -> Optional[Dict]:
         r"""
-        Sucht nach Vollmustern: \d{1,5}/\d{2}(SQ|M|MQ|TS|FÜ|CV)...
-        Unterstützt verschiedene Trennzeichen: / - .
+        Sucht nach Vollmustern: \d{1,4}/\d{2}(SQ|M|MQ|TS|FÜ|CV)...
+        Unterstützt nur Schrägstrich (/) als Trennzeichen
         Erkennt auch erweiterte Formate mit Bereich und Reno-Kürzel:
         - 111/24SQ09/BO (mit Schrägstrich vor Reno)
         - 111/24SQ08BO (ohne Schrägstrich vor Reno)
@@ -578,14 +572,12 @@ class AktenzeichenErkenner:
     def _suche_stamm_mit_register(self, text: str) -> Optional[Dict]:
         """
         Sucht nach Stämmen und prüft gegen Aktenregister
-        Unterstützt verschiedene Formate: / - .
-        Unterstützt bis zu 7 Stellen vor dem Jahr (z.B. 1234567/25)
+        Unterstützt 1-4 Stellen vor dem Jahr (z.B. 1234/25)
+        Nur Schrägstrich als Trennzeichen
         """
-        # Patterns für verschiedene Formate
+        # Pattern für Aktenzeichen-Stamm
         patterns = [
-            r'\b(\d{1,7})[/](\d{1,2})\b',  # 1234567/01
-            r'\b(\d{1,7})[-](\d{1,2})\b',  # 1234567-01
-            r'\b(\d{1,7})[.](\d{1,2})\b',  # 1234567.01
+            r'\b(\d{1,4})[/](\d{1,2})\b',  # 1234/01
         ]
 
         gefundene_staemme = set()  # Vermeide Duplikate
