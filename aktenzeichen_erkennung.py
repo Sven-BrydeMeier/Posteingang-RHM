@@ -143,8 +143,9 @@ class AktenzeichenErkenner:
         'dr.', 'dr', 'doktor'
     ]
 
-    # Schlagwörter für "Ihr Zeichen" etc. (erweitert für bessere Erkennung)
+    # Schlagwörter für "Ihr Zeichen" etc. (erweitert für bessere Erkennung + OCR-Varianten)
     ZEICHEN_KEYWORDS = [
+        # Original-Keywords
         'ihr zeichen', 'ihr zeichen:', 'ihr-zeichen', 'ihr-zeichen:',
         'unser zeichen', 'unser zeichen:', 'unser-zeichen', 'unser-zeichen:',
         'ihr az', 'ihr az.', 'ihr az:', 'ihr az.:',
@@ -153,6 +154,13 @@ class AktenzeichenErkenner:
         'verwendungszweck', 'verwendungszweck:',
         'aktenzeichen:', 'az:', 'az.:',
         'iz', 'iz:', 'iz.',  # Kurzform für "Ihr Zeichen"
+
+        # OCR-Varianten (häufige Verwechslungen)
+        'lhr zeichen', 'lhr zeichen:',  # I statt h
+        'lz', 'lz:', 'lz.',              # I statt h in iZ
+        'ihr ze ichen', 'ihr ze ichen:',  # Leerzeichen im Wort
+        'ihrz eichen', 'ihrz eichen:',    # Leerzeichen falsch
+        'lhrz eichen',                    # Kombination
     ]
 
     # Externe Aktenzeichen-Schlagwörter
@@ -256,6 +264,76 @@ class AktenzeichenErkenner:
             String wie "MQ|SQ|TS|CV|..." für Verwendung in Regex
         """
         return '|'.join(self.KUERZEL)
+
+    def _normalisiere_ocr_text(self, text: str) -> str:
+        """
+        Normalisiert OCR-Text für bessere Aktenzeichen-Erkennung.
+
+        Behebt häufige OCR-Fehler:
+        - Leerzeichen um Schrägstrich: "111 / 24" → "111/24"
+        - Leerzeichen in Zahlen-Folgen: "1 23/24" → "123/24"
+        - Schrägstrich-Verwechslungen: "111I24", "111l24" → "111/24"
+        - Leerzeichen vor Kürzeln: "111/24 SQ" → "111/24SQ"
+        """
+        if not text:
+            return text
+
+        def clean_aktenzeichen_erweitert(match):
+            """Bereinigt erweiterte Aktenzeichen: 111/24SQ09/BO"""
+            g1, g2, g3, g4, g5 = match.groups()
+            # Entferne Leerzeichen aus Zahlengruppen
+            num1 = re.sub(r'\s+', '', g1)
+            num2 = re.sub(r'\s+', '', g2)
+            kuerzel = g3
+            bereich = g4
+            reno = g5
+            return f"{num1}/{num2}{kuerzel}{bereich}/{reno}"
+
+        def clean_aktenzeichen_mit_kuerzel(match):
+            """Bereinigt Aktenzeichen mit Kürzel: 111/24SQ"""
+            g1, g2, g3 = match.groups()
+            # Entferne Leerzeichen aus Zahlengruppen
+            num1 = re.sub(r'\s+', '', g1)
+            num2 = re.sub(r'\s+', '', g2)
+            kuerzel = g3
+            return f"{num1}/{num2}{kuerzel}"
+
+        def clean_aktenzeichen_stamm(match):
+            """Bereinigt Aktenzeichen-Stamm: 111/24"""
+            g1, g2 = match.groups()
+            # Entferne Leerzeichen aus Zahlengruppen
+            num1 = re.sub(r'\s+', '', g1)
+            num2 = re.sub(r'\s+', '', g2)
+            return f"{num1}/{num2}"
+
+        # STRATEGIE: Finde komplette Aktenzeichen-Muster (inkl. Leerzeichen) und bereinige sie
+        # WICHTIG: Separatoren [/IlL\\] - aber NICHT "1" (Ziffer)
+
+        # Pattern 1: Erweiterte Format mit Bereich und Reno
+        # z.B. "1 11/24 SQ 09 / BO" → "111/24SQ09/BO"
+        text = re.sub(
+            r'\b([\d\s]{1,7})\s*[/IlL\\]\s*([\d\s]{1,3})\s*([A-ZÄÖÜ]{1,3})\s*(\d{2})\s*[/IlL\\]\s*([A-Z]{2,3})\b',
+            clean_aktenzeichen_erweitert,
+            text
+        )
+
+        # Pattern 2: Standard mit Kürzel
+        # z.B. "1 11 / 24 SQ" → "111/24SQ"
+        text = re.sub(
+            r'\b([\d\s]{1,7})\s*[/IlL\\]\s*([\d\s]{1,3})\s*([A-ZÄÖÜ]{1,3})\b',
+            clean_aktenzeichen_mit_kuerzel,
+            text
+        )
+
+        # Pattern 3: Nur Stamm (ohne Kürzel)
+        # z.B. "1 11 / 24" → "111/24"
+        text = re.sub(
+            r'\b([\d\s]{1,7})\s*[/IlL\\]\s*([\d\s]{1,3})\b',
+            clean_aktenzeichen_stamm,
+            text
+        )
+
+        return text
 
     def _get_patterns_erweitert(self):
         """Generiert erweiterte Patterns dynamisch mit allen Kürzeln. Unterstützt 1-4 Stellen."""
@@ -426,7 +504,11 @@ class AktenzeichenErkenner:
 
         Erweitert: Durchsucht 2 Zeilen VOR und 2 Zeilen NACH dem Keyword
         sowie die gleiche Zeile (insgesamt 5 Zeilen Kontext)
+
+        OCR-tolerant: Normalisiert Text vor der Suche
         """
+        # OCR-Normalisierung für bessere Erkennung
+        text = self._normalisiere_ocr_text(text)
         lines = text.split('\n')
 
         for i, line in enumerate(lines):
@@ -521,7 +603,12 @@ class AktenzeichenErkenner:
         Erkennt auch erweiterte Formate mit Bereich und Reno-Kürzel:
         - 111/24SQ09/BO (mit Schrägstrich vor Reno)
         - 111/24SQ08BO (ohne Schrägstrich vor Reno)
+
+        OCR-tolerant: Normalisiert Text vor der Suche
         """
+        # OCR-Normalisierung für bessere Erkennung
+        text = self._normalisiere_ocr_text(text)
+
         # Patterns für verschiedene Formate (dynamisch generiert)
         patterns = self._get_patterns_erweitert() + self._get_patterns_standard()
 
@@ -574,7 +661,12 @@ class AktenzeichenErkenner:
         Sucht nach Stämmen und prüft gegen Aktenregister
         Unterstützt 1-4 Stellen vor dem Jahr (z.B. 1234/25)
         Nur Schrägstrich als Trennzeichen
+
+        OCR-tolerant: Normalisiert Text vor der Suche
         """
+        # OCR-Normalisierung für bessere Erkennung
+        text = self._normalisiere_ocr_text(text)
+
         # Pattern für Aktenzeichen-Stamm
         patterns = [
             r'\b(\d{1,4})[/](\d{1,2})\b',  # 1234/01
