@@ -302,7 +302,25 @@ if not st.session_state.current_user:
 
         with col_center:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🚀 Zur Demo", type="primary", use_container_width=True, key="demo_button"):
+
+            # Direkt-Start Button (ohne Login)
+            if st.button("🚀 Demo starten", type="primary", use_container_width=True, key="demo_start_button"):
+                # Erstelle Demo-User Session
+                demo_user = {
+                    'id': 'demo_user',
+                    'email': 'demo@rhm.de',
+                    'name': 'Demo Benutzer',
+                    'role': UserRole.ADMIN.value,
+                    'created_at': datetime.now().isoformat()
+                }
+                st.session_state.current_user = demo_user
+                st.session_state.session_token = 'demo_session'
+                st.rerun()
+
+            st.markdown("<p style='text-align: center; margin: 1rem 0 0.5rem 0; color: #888;'>oder</p>", unsafe_allow_html=True)
+
+            # Optionaler Login-Button
+            if st.button("🔐 Mit Account anmelden", use_container_width=True, key="login_button"):
                 st.session_state.show_demo = True
                 st.rerun()
 
