@@ -1005,10 +1005,11 @@ if current_user['role'] in ['Administrator', 'Empfang']:
 
     with col1:
         st.subheader("📄 Tagespost-PDF hochladen")
-        uploaded_pdf = st.file_uploader(
-            "PDF-Datei mit Tagespost (OCR)",
+        uploaded_pdfs = st.file_uploader(
+            "PDF-Dateien mit Tagespost (OCR) - mehrere Dateien möglich",
             type=["pdf"],
-            help="Laden Sie die OCR-PDF-Datei mit der Tagespost hoch"
+            accept_multiple_files=True,
+            help="Laden Sie eine oder mehrere OCR-PDF-Dateien hoch (Drag & Drop mehrerer Dateien möglich)"
         )
 
     with col2:
@@ -1107,228 +1108,252 @@ if st.session_state.batch_mode_active and st.session_state.batch_count > 0:
                 st.metric(sb, count, delta=None)
 
 # Verarbeitungsbutton (Excel ist optional wenn gespeichert)
-can_process = uploaded_pdf and current_api_key and (uploaded_excel or storage.has_aktenregister())
+can_process = uploaded_pdfs and current_api_key and (uploaded_excel or storage.has_aktenregister())
 if st.button("🚀 Verarbeitung starten" if st.session_state.batch_count == 0 else "📄 Weiteren Batch verarbeiten",
              type="primary", disabled=not can_process):
     if not current_api_key:
         st.error(f"❌ Bitte geben Sie Ihren {api_provider} API-Key ein!")
-    elif not uploaded_pdf:
-        st.error("❌ Bitte laden Sie eine PDF-Datei hoch!")
+    elif not uploaded_pdfs:
+        st.error("❌ Bitte laden Sie mindestens eine PDF-Datei hoch!")
     else:
-        # Temporäres Verzeichnis für die Verarbeitung
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
+        # Behandle uploaded_pdfs als Liste (auch wenn nur 1 Datei)
+        pdf_files = uploaded_pdfs if isinstance(uploaded_pdfs, list) else [uploaded_pdfs]
+        total_files = len(pdf_files)
 
-            # Dateien speichern
-            pdf_path = temp_path / "tagespost.pdf"
-            excel_path = temp_path / "aktenregister.xlsx"
+        # Zeige Info über Anzahl der Dateien
+        if total_files > 1:
+            st.info(f"📦 **{total_files} PDF-Dateien werden nacheinander verarbeitet**")
 
-            # Lese PDF-Bytes einmalig
-            pdf_bytes = uploaded_pdf.read()
-            with open(pdf_path, "wb") as f:
-                f.write(pdf_bytes)
+        # Verarbeite jede PDF-Datei nacheinander
+        for file_index, uploaded_pdf in enumerate(pdf_files, start=1):
+            # Zeige aktuellen Datei-Fortschritt
+            if total_files > 1:
+                st.markdown(f"---")
+                st.subheader(f"📄 Datei {file_index} von {total_files}: {uploaded_pdf.name}")
 
-            # Duplikate-Prüfung
-            duplicate_detector = DuplicateDetector(storage.storage_dir)
+            # Temporäres Verzeichnis für die Verarbeitung
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_path = Path(temp_dir)
 
-            # Extrahiere kurzen Text-Preview für Duplikate-Check
-            import fitz
-            try:
-                with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
-                    preview_text = ""
-                    for page_num in range(min(3, len(doc))):  # Erste 3 Seiten
-                        preview_text += doc[page_num].get_text()
+                # Dateien speichern
+                pdf_path = temp_path / "tagespost.pdf"
+                excel_path = temp_path / "aktenregister.xlsx"
 
-                is_duplicate, duplicate_info = duplicate_detector.check_duplicate(pdf_bytes, preview_text)
+                # Lese PDF-Bytes einmalig
+                pdf_bytes = uploaded_pdf.read()
+                with open(pdf_path, "wb") as f:
+                    f.write(pdf_bytes)
 
-                if is_duplicate:
-                    st.warning(f"⚠️ **Duplikat erkannt!**")
-                    st.info(f"""
-                    Dieses Dokument wurde bereits verarbeitet:
-                    - **Datum**: {duplicate_info.get('timestamp', 'Unbekannt')[:19]}
-                    - **Größe**: {duplicate_info.get('size_bytes', 0) / 1024:.1f} KB
-                    - **Ähnlichkeit**: {duplicate_info.get('similarity', 1.0) * 100:.0f}%
-                    """)
+                # Duplikate-Prüfung
+                duplicate_detector = DuplicateDetector(storage.storage_dir)
 
-                    if not st.checkbox("Trotzdem verarbeiten?", key="process_duplicate"):
-                        st.stop()
-            except Exception as e:
-                st.warning(f"⚠️ Duplikate-Check fehlgeschlagen: {e}")
-
-            # Progress-Container
-            progress_container = st.container()
-            with progress_container:
-                st.info("⏳ Verarbeitung läuft...")
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-
+                # Extrahiere kurzen Text-Preview für Duplikate-Check
+                import fitz
                 try:
-                    # 1. Aktenregister vorbereiten
-                    status_text.text("📊 Lade Aktenregister...")
-                    progress_bar.progress(10)
+                    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+                        preview_text = ""
+                        for page_num in range(min(3, len(doc))):  # Erste 3 Seiten
+                            preview_text += doc[page_num].get_text()
 
-                    if uploaded_excel:
-                        # Neues Excel hochgeladen: Merge mit gespeichertem
-                        import pandas as pd
-                        new_df = pd.read_excel(BytesIO(uploaded_excel.read()), sheet_name='akten', header=1)
+                    is_duplicate, duplicate_info = duplicate_detector.check_duplicate(pdf_bytes, preview_text)
 
-                        # Speichere und merge mit vorhandenem
-                        merged_df = storage.save_aktenregister(new_df, merge=storage.has_aktenregister())
-                        st.success(f"✅ Aktenregister aktualisiert: {len(merged_df)} Akten")
+                    if is_duplicate:
+                        st.warning(f"⚠️ **Duplikat erkannt!**")
+                        st.info(f"""
+                        Dieses Dokument wurde bereits verarbeitet:
+                        - **Datum**: {duplicate_info.get('timestamp', 'Unbekannt')[:19]}
+                        - **Größe**: {duplicate_info.get('size_bytes', 0) / 1024:.1f} KB
+                        - **Ähnlichkeit**: {duplicate_info.get('similarity', 1.0) * 100:.0f}%
+                        """)
 
-                        # Verwende gespeicherte Version
-                        excel_path = storage.aktenregister_file
-                    else:
-                        # Verwende nur gespeichertes Register
-                        excel_path = storage.aktenregister_file
-                        df = storage.load_aktenregister()
-                        st.info(f"📂 Verwende gespeichertes Register: {len(df)} Akten")
-
-                    erkenner = AktenzeichenErkenner(excel_path, storage=storage)
-
-                    # 2. PDF verarbeiten
-                    status_text.text("📄 Analysiere PDF und trenne Dokumente...")
-                    progress_bar.progress(20)
-
-                    # Live-Logging-Container
-                    log_container = st.empty()
-
-                    processor = PDFProcessor(pdf_path, debug=True, trennmodus="Text 'Trennseite'", excel_path=excel_path)
-                    dokumente, debug_info = processor.verarbeite_pdf()
-
-                    st.success(f"✅ {len(dokumente)} Einzeldokumente erkannt")
-
-                    # Zeige wichtige Statistiken
-                    st.info(f"""
-                    **Verarbeitungs-Statistik:**
-                    - Erkannte Dokumente: {len(dokumente)}
-                    - Trennblätter gefunden: {debug_info.count('TRENNBLATT')}
-                    - Leerseiten übersprungen: {debug_info.count('LEERSEITE')}
-                    """)
-
-                    # Debug-Informationen anzeigen
-                    with st.expander("🔍 Debug-Informationen zur PDF-Verarbeitung", expanded=True):
-                        for info in debug_info:
-                            st.text(info)
-
-                    # 3. Dokumente analysieren mit KI
-                    status_text.text(f"🤖 Analysiere Dokumente mit {api_provider}...")
-                    progress_bar.progress(40)
-
-                    # Initialisiere Training-Database für KI-gestützte Erkennung
-                    from training_database import TrainingDatabase
-                    training_db = TrainingDatabase(storage.storage_dir)
-                    analyzer = DocumentAnalyzer(current_api_key, api_provider=api_provider, training_db=training_db)
-
-                    alle_daten = []
-                    sachbearbeiter_stats = {"SQ": 0, "TS": 0, "M": 0, "FÜ": 0, "CV": 0, "nicht-zugeordnet": 0}
-
-                    for i, doc in enumerate(dokumente):
-                        status_text.text(f"🔍 Verarbeite Dokument {i+1}/{len(dokumente)}...")
-                        progress_bar.progress(40 + int(40 * (i+1) / len(dokumente)))
-
-                        # Aktenzeichen erkennen
-                        akt_info = erkenner.erkenne_aktenzeichen(doc['text'])
-
-                        # Sachbearbeiter aus Text erkennen (Anrede/Anschrift)
-                        sb_aus_text = erkenner.erkenne_sachbearbeiter_aus_text(doc['text'])
-
-                        # Dokumenteninhalt analysieren (inkl. Training-DB Vorschläge)
-                        analyse = analyzer.analysiere_dokument(doc['text'], akt_info)
-
-                        # Prüfe Training-Suggestion als zusätzliche Priorität
-                        training_sb = None
-                        if 'training_suggestion' in analyse and not sb_aus_text and not akt_info.get('kuerzel'):
-                            # Training-Vorschlag nur nutzen wenn keine anderen Quellen vorhanden
-                            suggestion = analyse['training_suggestion']
-                            if suggestion['haeufigkeit'] >= 2:  # Min. 2x zuvor gesehen
-                                training_sb = suggestion['sachbearbeiter']
-
-                        # Sachbearbeiter zuordnen (mit Priorität für Text-Erkennung)
-                        sb = erkenner.ermittle_sachbearbeiter(akt_info, analyse, sachbearbeiter_aus_text=sb_aus_text or training_sb)
-                        sachbearbeiter_stats[sb] = sachbearbeiter_stats.get(sb, 0) + 1
-
-                        # Dateiname generieren
-                        dateiname = erkenner.generiere_dateiname(
-                            akt_info.get('internes_az'),
-                            analyse.get('mandant'),
-                            analyse.get('gegner'),
-                            analyse.get('datum'),
-                            analyse.get('stichworte', []),
-                            aktenkurzbezeichnung=akt_info.get('aktenkurzbezeichnung')
-                        )
-
-                        alle_daten.append({
-                            'dokument': doc,
-                            'aktenzeichen_info': akt_info,
-                            'analyse': analyse,
-                            'sachbearbeiter': sb,
-                            'sachbearbeiter_aus_text': sb_aus_text,  # Debug-Info speichern
-                            'dateiname': dateiname
-                        })
-
-                        # Zeige erweiterte Debug-Info mit Aktenzeichen und Quelle
-                        debug_parts = [f"📄 Dok {i+1}/{len(dokumente)}"]
-
-                        # Aktenzeichen-Info
-                        if akt_info.get('internes_az'):
-                            az_quelle = akt_info.get('quelle', 'unbekannt')
-                            debug_parts.append(f"AZ: {akt_info['internes_az']} ({az_quelle})")
-                        else:
-                            debug_parts.append("AZ: nicht erkannt")
-
-                        # Sachbearbeiter-Zuordnung
-                        if training_sb:
-                            suggestion = analyse.get('training_suggestion', {})
-                            fuzzy = " (ähnlich)" if suggestion.get('fuzzy_match') else ""
-                            debug_parts.append(f"SB: {sb} (aus Training-DB{fuzzy}, {suggestion.get('haeufigkeit', 0)}x)")
-                        elif sb_aus_text:
-                            debug_parts.append(f"SB: {sb} (aus Anrede/Anschrift)")
-                        elif akt_info.get('kuerzel'):
-                            debug_parts.append(f"SB: {sb} (aus AZ-Kürzel)")
-                        elif 'register_data' in akt_info:
-                            debug_parts.append(f"SB: {sb} (aus Register)")
-                        else:
-                            # Zeige Training-Suggestion wenn vorhanden, aber nicht genutzt
-                            if 'training_suggestion' in analyse:
-                                suggestion = analyse['training_suggestion']
-                                debug_parts.append(f"SB: {sb} (nicht zugeordnet, Training-Vorschlag: {suggestion['sachbearbeiter']} ({suggestion['haeufigkeit']}x))")
-                            else:
-                                debug_parts.append(f"SB: {sb} (nicht zugeordnet)")
-
-                        # Dateiname
-                        debug_parts.append(f"→ {dateiname}")
-
-                        st.text(" | ".join(debug_parts))
-
-                    progress_bar.progress(100)
-                    status_text.text("✅ Batch-Verarbeitung abgeschlossen!")
-
-                    # Füge Dokumente zu akkumulierten Daten hinzu
-                    st.session_state.accumulated_documents.extend(alle_daten)
-
-                    # Aktualisiere akkumulierte Statistiken
-                    for sb, count in sachbearbeiter_stats.items():
-                        st.session_state.sachbearbeiter_stats_accumulated[sb] = \
-                            st.session_state.sachbearbeiter_stats_accumulated.get(sb, 0) + count
-
-                    # Batch-Counter erhöhen
-                    st.session_state.batch_count += 1
-                    st.session_state.batch_mode_active = True
-
-                    # Speichere alle Daten für Zugriff
-                    st.session_state.alle_daten = list(st.session_state.accumulated_documents)
-
-                    # Zeige Batch-Info
-                    st.success(f"✅ Batch #{st.session_state.batch_count} verarbeitet: {len(alle_daten)} Dokumente")
-                    st.info(f"📊 **Gesamt akkumuliert**: {len(st.session_state.accumulated_documents)} Dokumente aus {st.session_state.batch_count} Batch(es)")
-
-                    # Setze Flag dass Batch verarbeitet wurde (NICHT finale Verarbeitung)
-                    st.session_state.batch_verarbeitet = True
-
+                        if not st.checkbox("Trotzdem verarbeiten?", key=f"process_duplicate_{file_index}"):
+                            continue  # Skip this file and continue with next
                 except Exception as e:
-                    st.error(f"❌ Fehler bei der Verarbeitung: {str(e)}")
-                    st.exception(e)
+                    st.warning(f"⚠️ Duplikate-Check fehlgeschlagen: {e}")
+
+                # Progress-Container
+                progress_container = st.container()
+                with progress_container:
+                    st.info("⏳ Verarbeitung läuft...")
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+
+                    try:
+                        # 1. Aktenregister vorbereiten
+                        status_text.text("📊 Lade Aktenregister...")
+                        progress_bar.progress(10)
+
+                        if uploaded_excel:
+                            # Neues Excel hochgeladen: Merge mit gespeichertem
+                            import pandas as pd
+                            new_df = pd.read_excel(BytesIO(uploaded_excel.read()), sheet_name='akten', header=1)
+
+                            # Speichere und merge mit vorhandenem
+                            merged_df = storage.save_aktenregister(new_df, merge=storage.has_aktenregister())
+                            st.success(f"✅ Aktenregister aktualisiert: {len(merged_df)} Akten")
+
+                            # Verwende gespeicherte Version
+                            excel_path = storage.aktenregister_file
+                        else:
+                            # Verwende nur gespeichertes Register
+                            excel_path = storage.aktenregister_file
+                            df = storage.load_aktenregister()
+                            st.info(f"📂 Verwende gespeichertes Register: {len(df)} Akten")
+
+                        erkenner = AktenzeichenErkenner(excel_path, storage=storage)
+
+                        # 2. PDF verarbeiten
+                        status_text.text("📄 Analysiere PDF und trenne Dokumente...")
+                        progress_bar.progress(20)
+
+                        # Live-Logging-Container
+                        log_container = st.empty()
+
+                        processor = PDFProcessor(pdf_path, debug=True, trennmodus="Text 'Trennseite'", excel_path=excel_path)
+                        dokumente, debug_info = processor.verarbeite_pdf()
+
+                        st.success(f"✅ {len(dokumente)} Einzeldokumente erkannt")
+
+                        # Zeige wichtige Statistiken
+                        st.info(f"""
+                        **Verarbeitungs-Statistik:**
+                        - Erkannte Dokumente: {len(dokumente)}
+                        - Trennblätter gefunden: {debug_info.count('TRENNBLATT')}
+                        - Leerseiten übersprungen: {debug_info.count('LEERSEITE')}
+                        """)
+
+                        # Debug-Informationen anzeigen
+                        with st.expander("🔍 Debug-Informationen zur PDF-Verarbeitung", expanded=True):
+                            for info in debug_info:
+                                st.text(info)
+
+                        # 3. Dokumente analysieren mit KI
+                        status_text.text(f"🤖 Analysiere Dokumente mit {api_provider}...")
+                        progress_bar.progress(40)
+
+                        # Initialisiere Training-Database für KI-gestützte Erkennung
+                        from training_database import TrainingDatabase
+                        training_db = TrainingDatabase(storage.storage_dir)
+                        analyzer = DocumentAnalyzer(current_api_key, api_provider=api_provider, training_db=training_db)
+
+                        alle_daten = []
+                        sachbearbeiter_stats = {"SQ": 0, "TS": 0, "M": 0, "FÜ": 0, "CV": 0, "nicht-zugeordnet": 0}
+
+                        for i, doc in enumerate(dokumente):
+                            status_text.text(f"🔍 Verarbeite Dokument {i+1}/{len(dokumente)}...")
+                            progress_bar.progress(40 + int(40 * (i+1) / len(dokumente)))
+
+                            # Aktenzeichen erkennen
+                            akt_info = erkenner.erkenne_aktenzeichen(doc['text'])
+
+                            # Sachbearbeiter aus Text erkennen (Anrede/Anschrift)
+                            sb_aus_text = erkenner.erkenne_sachbearbeiter_aus_text(doc['text'])
+
+                            # Dokumenteninhalt analysieren (inkl. Training-DB Vorschläge)
+                            analyse = analyzer.analysiere_dokument(doc['text'], akt_info)
+
+                            # Prüfe Training-Suggestion als zusätzliche Priorität
+                            training_sb = None
+                            if 'training_suggestion' in analyse and not sb_aus_text and not akt_info.get('kuerzel'):
+                                # Training-Vorschlag nur nutzen wenn keine anderen Quellen vorhanden
+                                suggestion = analyse['training_suggestion']
+                                if suggestion['haeufigkeit'] >= 2:  # Min. 2x zuvor gesehen
+                                    training_sb = suggestion['sachbearbeiter']
+
+                            # Sachbearbeiter zuordnen (mit Priorität für Text-Erkennung)
+                            sb = erkenner.ermittle_sachbearbeiter(akt_info, analyse, sachbearbeiter_aus_text=sb_aus_text or training_sb)
+                            sachbearbeiter_stats[sb] = sachbearbeiter_stats.get(sb, 0) + 1
+
+                            # Dateiname generieren
+                            dateiname = erkenner.generiere_dateiname(
+                                akt_info.get('internes_az'),
+                                analyse.get('mandant'),
+                                analyse.get('gegner'),
+                                analyse.get('datum'),
+                                analyse.get('stichworte', []),
+                                aktenkurzbezeichnung=akt_info.get('aktenkurzbezeichnung')
+                            )
+
+                            alle_daten.append({
+                                'dokument': doc,
+                                'aktenzeichen_info': akt_info,
+                                'analyse': analyse,
+                                'sachbearbeiter': sb,
+                                'sachbearbeiter_aus_text': sb_aus_text,  # Debug-Info speichern
+                                'dateiname': dateiname
+                            })
+
+                            # Zeige erweiterte Debug-Info mit Aktenzeichen und Quelle
+                            debug_parts = [f"📄 Dok {i+1}/{len(dokumente)}"]
+
+                            # Aktenzeichen-Info
+                            if akt_info.get('internes_az'):
+                                az_quelle = akt_info.get('quelle', 'unbekannt')
+                                debug_parts.append(f"AZ: {akt_info['internes_az']} ({az_quelle})")
+                            else:
+                                debug_parts.append("AZ: nicht erkannt")
+
+                            # Sachbearbeiter-Zuordnung
+                            if training_sb:
+                                suggestion = analyse.get('training_suggestion', {})
+                                fuzzy = " (ähnlich)" if suggestion.get('fuzzy_match') else ""
+                                debug_parts.append(f"SB: {sb} (aus Training-DB{fuzzy}, {suggestion.get('haeufigkeit', 0)}x)")
+                            elif sb_aus_text:
+                                debug_parts.append(f"SB: {sb} (aus Anrede/Anschrift)")
+                            elif akt_info.get('kuerzel'):
+                                debug_parts.append(f"SB: {sb} (aus AZ-Kürzel)")
+                            elif 'register_data' in akt_info:
+                                debug_parts.append(f"SB: {sb} (aus Register)")
+                            else:
+                                # Zeige Training-Suggestion wenn vorhanden, aber nicht genutzt
+                                if 'training_suggestion' in analyse:
+                                    suggestion = analyse['training_suggestion']
+                                    debug_parts.append(f"SB: {sb} (nicht zugeordnet, Training-Vorschlag: {suggestion['sachbearbeiter']} ({suggestion['haeufigkeit']}x))")
+                                else:
+                                    debug_parts.append(f"SB: {sb} (nicht zugeordnet)")
+
+                            # Dateiname
+                            debug_parts.append(f"→ {dateiname}")
+
+                            st.text(" | ".join(debug_parts))
+
+                        progress_bar.progress(100)
+                        status_text.text("✅ Batch-Verarbeitung abgeschlossen!")
+
+                        # Füge Dokumente zu akkumulierten Daten hinzu
+                        st.session_state.accumulated_documents.extend(alle_daten)
+
+                        # Aktualisiere akkumulierte Statistiken
+                        for sb, count in sachbearbeiter_stats.items():
+                            st.session_state.sachbearbeiter_stats_accumulated[sb] = \
+                                st.session_state.sachbearbeiter_stats_accumulated.get(sb, 0) + count
+
+                        # Batch-Counter erhöhen
+                        st.session_state.batch_count += 1
+                        st.session_state.batch_mode_active = True
+
+                        # Speichere alle Daten für Zugriff
+                        st.session_state.alle_daten = list(st.session_state.accumulated_documents)
+
+                        # Zeige Batch-Info
+                        if total_files > 1:
+                            st.success(f"✅ Datei {file_index}/{total_files} verarbeitet: {len(alle_daten)} Dokumente")
+                        else:
+                            st.success(f"✅ Batch #{st.session_state.batch_count} verarbeitet: {len(alle_daten)} Dokumente")
+                        st.info(f"📊 **Gesamt akkumuliert**: {len(st.session_state.accumulated_documents)} Dokumente aus {st.session_state.batch_count} Batch(es)")
+
+                        # Setze Flag dass Batch verarbeitet wurde (NICHT finale Verarbeitung)
+                        st.session_state.batch_verarbeitet = True
+
+                    except Exception as e:
+                        st.error(f"❌ Fehler bei der Verarbeitung von Datei {file_index}/{total_files}: {str(e)}")
+                        st.exception(e)
+
+        # Zusammenfassung nach allen Dateien
+        if total_files > 1:
+            st.markdown("---")
+            st.success(f"🎉 **Alle {total_files} PDF-Dateien erfolgreich verarbeitet!**")
+            st.info(f"📊 Gesamt: {len(st.session_state.accumulated_documents)} Dokumente aus {total_files} Dateien")
 
 # Zeige Batch-Aktionen wenn Batch verarbeitet wurde
 if st.session_state.get('batch_verarbeitet', False):
