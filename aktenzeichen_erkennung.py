@@ -275,11 +275,42 @@ class AktenzeichenErkenner:
         - Schrägstrich-Verwechslungen: "111I24", "111l24" → "111/24"
         - Leerzeichen vor Kürzeln: "111/24 SQ" → "111/24SQ"
         - Zusammengeklebte Zahlen: "1342/2450089" → "1342/24 50089"
+        - Umlaut-Verwechslungen: "T6" → "Tö", "B0" → "Bö"
         """
         if not text:
             return text
 
-        # VORVERARBEITUNG: Trenne zusammengeklebte Jahr+Nummer Kombinationen
+        # VORVERARBEITUNG 1: Korrigiere häufige Umlaut-OCR-Fehler in Reno-Kürzeln
+        # Pattern: Nach einem Aktenzeichen-Format kommt oft ein 2-3 stelliges Reno-Kürzel
+        # OCR liest häufig: ö→6, ü→ii, ä→a
+        # z.B. "132/25TS04T6" → "132/25TS04Tö"
+        def fix_umlaut_ocr_in_reno(match):
+            """Korrigiert Umlaut-OCR-Fehler in Reno-Kürzeln"""
+            full_match = match.group(0)
+            reno = match.group(5)  # Das Reno-Kürzel (z.B. "T6", "B0")
+
+            # Ersetze häufige OCR-Fehler bei Umlauten
+            reno_fixed = reno
+            reno_fixed = re.sub(r'([A-Z])6\b', r'\1ö', reno_fixed)  # T6 → Tö, B6 → Bö
+            reno_fixed = re.sub(r'([A-Z])0\b', r'\1ö', reno_fixed)  # T0 → Tö (alternative)
+            reno_fixed = re.sub(r'([A-Z])ii\b', r'\1ü', reno_fixed, flags=re.IGNORECASE)  # Tii → Tü
+            reno_fixed = re.sub(r'([A-Z])u([A-Z])\b', r'\1ü\2', reno_fixed)  # TuE → TüE
+
+            if reno != reno_fixed:
+                # Ersetze nur das Reno-Kürzel im Match
+                return full_match.replace(reno, reno_fixed)
+            return full_match
+
+        # Finde erweiterte Aktenzeichen-Formate mit potentiell fehlerhaften Reno-Kürzeln
+        # Format: 132/25TS04T6 (mit Ziffer im Reno)
+        text = re.sub(
+            r'\b(\d{1,4})/(\d{1,2})([A-Z]{2,3})(\d{2})([A-Z0-9]{2,3})\b',
+            fix_umlaut_ocr_in_reno,
+            text,
+            flags=re.IGNORECASE
+        )
+
+        # VORVERARBEITUNG 2: Trenne zusammengeklebte Jahr+Nummer Kombinationen
         # z.B. "1342/2450089 / Li" → "1342/24 50089 / Li"
         # Pattern: 1-4 Ziffern / 2-stelliges Jahr + weitere Ziffern
         def split_concatenated_numbers(match):
@@ -387,8 +418,12 @@ class AktenzeichenErkenner:
         """Generiert erweiterte Patterns dynamisch mit allen Kürzeln. Unterstützt 1-4 Stellen."""
         kuerzel_regex = self.get_all_kuerzel_regex()
         return [
-            rf'\b(\d{{1,4}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})/([A-Z]{{2,3}})\b',  # 111/24SQ09/BO
-            rf'\b(\d{{1,4}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})([A-Z]{{2,3}})\b',   # 111/24SQ08BO
+            # Standard-Format: nur Buchstaben im Reno (z.B. BO, Li)
+            rf'\b(\d{{1,4}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})/([A-ZÄÖÜß]{{2,3}})\b',  # 111/24SQ09/BO
+            rf'\b(\d{{1,4}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})([A-ZÄÖÜß]{{2,3}})\b',   # 111/24SQ08BO
+            # OCR-tolerant: akzeptiert Ziffern im Reno (z.B. T6 statt Tö)
+            rf'\b(\d{{1,4}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})/([A-Z0-9]{{2,3}})\b',  # 111/24SQ09/T6
+            rf'\b(\d{{1,4}})/(\d{{1,2}})({kuerzel_regex})(\d{{2}})([A-Z0-9]{{2,3}})\b',   # 111/24SQ08T6
         ]
 
     def _get_patterns_standard(self):
