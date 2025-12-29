@@ -456,8 +456,36 @@ if not st.session_state.current_user:
                     # Benachrichtige Admins
                     admins = user_manager.get_users_by_role("Administrator")
                     for admin in admins:
-                        # TODO: Email an Admin senden
-                        pass
+                        # Sende Email-Benachrichtigung an Admin
+                        if admin.get('email'):
+                            subject = "Passwort-Reset angefordert"
+                            message = f"""
+Ein Benutzer hat einen Passwort-Reset angefordert:
+
+Email: {reset_email}
+Zeitpunkt: {datetime.now().strftime('%d.%m.%Y %H:%M')}
+Reset-Token: {token}
+
+Bitte setzen Sie das Passwort für diesen Benutzer zurück oder kontaktieren Sie ihn.
+
+---
+RHM Posteingangsverarbeitung
+                            """
+
+                            try:
+                                # Verwende EmailSender wenn konfiguriert
+                                email_sender = EmailSender()
+                                if email_sender.is_configured():
+                                    email_sender.send_email(
+                                        recipient=admin['email'],
+                                        subject=subject,
+                                        body=message
+                                    )
+                                else:
+                                    # Fallback: Zeige Admin-Info
+                                    st.info(f"📧 Admin {admin['name']} wurde informiert (Email-Versand nicht konfiguriert)")
+                            except Exception as e:
+                                st.warning(f"⚠️ Email-Versand an Admin fehlgeschlagen: {str(e)}")
 
                     st.code(f"Reset-Token (für Admin): {token[:16]}...")
                 else:
@@ -1075,7 +1103,48 @@ if dashboard_data['unseen_count'] > 0:
 
             with col_c:
                 if st.button("📥 Details", key=f"view_{doc.get('dateiname')}"):
-                    st.info("Download-Funktion hier")
+                    # Zeige Details des Dokuments
+                    with st.expander(f"📄 Details: {doc.get('dateiname')}", expanded=True):
+                        # Basis-Informationen
+                        st.markdown("### 📋 Dokumenten-Information")
+                        col1, col2 = st.columns(2)
+
+                        with col1:
+                            st.write(f"**Dateiname:** {doc.get('dateiname', '-')}")
+                            st.write(f"**Aktenzeichen:** {doc.get('aktenzeichen_info', {}).get('internes_az', '-')}")
+                            st.write(f"**Sachbearbeiter:** {doc.get('sachbearbeiter', '-')}")
+
+                        with col2:
+                            analyse = doc.get('analyse', {})
+                            st.write(f"**Datum:** {analyse.get('datum', '-')}")
+                            st.write(f"**Mandant:** {analyse.get('mandant', '-')}")
+                            st.write(f"**Gegner:** {analyse.get('gegner', '-')}")
+
+                        # Stichworte
+                        if analyse.get('stichworte'):
+                            st.write(f"**Stichworte:** {', '.join(analyse.get('stichworte', []))}")
+
+                        # Fristen
+                        deadline_info = analyse.get('deadline_info', {})
+                        if deadline_info.get('earliest_deadline'):
+                            st.markdown("### ⏰ Fristen")
+                            earliest = deadline_info['earliest_deadline']
+                            st.warning(f"**Frist:** {earliest.get('datum', '-')} - {earliest.get('beschreibung', '-')}")
+
+                        # Text-Vorschau
+                        st.markdown("### 📝 Text-Vorschau")
+                        doc_text = doc.get('dokument', {}).get('text', '')
+                        st.text_area("Dokumententext:", value=doc_text[:1000] + ("..." if len(doc_text) > 1000 else ""), height=200, key=f"text_{doc.get('dateiname')}")
+
+                        # Download-Button für PDF
+                        if 'dokument' in doc and 'pdf_bytes' in doc['dokument']:
+                            st.download_button(
+                                label="📥 PDF herunterladen",
+                                data=doc['dokument']['pdf_bytes'],
+                                file_name=doc.get('dateiname', 'dokument.pdf'),
+                                mime="application/pdf",
+                                key=f"download_{doc.get('dateiname')}"
+                            )
 
         # Markiere als gesehen
         if st.button("✅ Alle als gesehen markieren"):
@@ -2406,7 +2475,49 @@ with tab3:
 
                 with col2:
                     if st.button("📅 Verschieben", key=f"move_{item['id']}"):
-                        st.info("Verschiebe-Funktion")
+                        # Session-State für Modal-Dialog
+                        st.session_state[f"move_dialog_{item['id']}"] = True
+
+                # Verschieben-Dialog (außerhalb der Spalten)
+                if st.session_state.get(f"move_dialog_{item['id']}", False):
+                    with st.form(key=f"move_form_{item['id']}"):
+                        st.markdown("#### 📅 Wiedervorlage verschieben")
+                        from datetime import datetime, timedelta
+
+                        # Aktuelles Datum
+                        current_date = datetime.fromisoformat(item['datum'][:10])
+
+                        # Neues Datum
+                        new_date = st.date_input(
+                            "Neues Datum:",
+                            value=current_date + timedelta(days=7),
+                            min_value=datetime.now().date()
+                        )
+
+                        # Notiz hinzufügen
+                        move_note = st.text_area("Grund für Verschiebung (optional):", key=f"note_{item['id']}")
+
+                        col_btn1, col_btn2 = st.columns(2)
+
+                        with col_btn1:
+                            if st.form_submit_button("✅ Verschieben", type="primary"):
+                                # Aktualisiere Datum
+                                wv.update_wiedervorlage(item['id'], {'datum': datetime.combine(new_date, datetime.min.time()).isoformat()})
+
+                                # Füge Notiz hinzu wenn vorhanden
+                                if move_note:
+                                    current_notiz = item.get('notiz', '')
+                                    updated_notiz = f"{current_notiz}\n\n[Verschoben am {datetime.now().strftime('%Y-%m-%d')}]: {move_note}"
+                                    wv.update_wiedervorlage(item['id'], {'notiz': updated_notiz})
+
+                                st.session_state[f"move_dialog_{item['id']}"] = False
+                                st.success(f"✅ Wiedervorlage auf {new_date} verschoben!")
+                                st.rerun()
+
+                        with col_btn2:
+                            if st.form_submit_button("❌ Abbrechen"):
+                                st.session_state[f"move_dialog_{item['id']}"] = False
+                                st.rerun()
 
                 with col3:
                     if st.button("🗑️ Löschen", key=f"del_{item['id']}"):
@@ -2465,9 +2576,28 @@ with tab4:
                                 st.write(f"- {pdf['filename']} ({pdf['size'] / 1024:.1f} KB)")
 
                             if st.button(f"✅ Verarbeiten", key=f"process_{email_data['email_id']}"):
-                                # TODO: Verarbeiten
+                                # Speichere PDFs zur Session für Verarbeitung
+                                import tempfile
+                                from pathlib import Path
+
+                                # Erstelle temporäre Dateien für PDFs
+                                if 'email_import_pdfs' not in st.session_state:
+                                    st.session_state.email_import_pdfs = []
+
+                                for pdf in email_data['pdfs']:
+                                    st.session_state.email_import_pdfs.append({
+                                        'name': pdf['filename'],
+                                        'bytes': pdf['data'],
+                                        'from': email_data['from'],
+                                        'subject': email_data['subject']
+                                    })
+
+                                # Markiere Email als verarbeitet
                                 email_imp.mark_email_as_processed(email_data['email_id'])
-                                st.success("Markiert als verarbeitet")
+
+                                st.success(f"✅ {len(email_data['pdfs'])} PDF(s) importiert und zur Verarbeitung bereitgestellt!")
+                                st.info("📋 **Hinweis:** Die importierten PDFs stehen jetzt im Post-Eingang zur Verarbeitung bereit.")
+                                st.info("💡 **Tipp:** Wechseln Sie zum Tab 'Post-Eingang' und laden Sie die PDFs dort hoch.")
                 else:
                     st.info("Keine neuen Emails mit PDFs gefunden")
     else:
