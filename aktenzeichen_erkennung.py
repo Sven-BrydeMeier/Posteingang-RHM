@@ -274,9 +274,34 @@ class AktenzeichenErkenner:
         - Leerzeichen in Zahlen-Folgen: "1 23/24" → "123/24"
         - Schrägstrich-Verwechslungen: "111I24", "111l24" → "111/24"
         - Leerzeichen vor Kürzeln: "111/24 SQ" → "111/24SQ"
+        - Zusammengeklebte Zahlen: "1342/2450089" → "1342/24 50089"
         """
         if not text:
             return text
+
+        # VORVERARBEITUNG: Trenne zusammengeklebte Jahr+Nummer Kombinationen
+        # z.B. "1342/2450089 / Li" → "1342/24 50089 / Li"
+        # Pattern: 1-4 Ziffern / 2-stelliges Jahr + weitere Ziffern
+        def split_concatenated_numbers(match):
+            """Trennt Jahr von nachfolgenden Ziffern: 2450089 → 24 50089"""
+            laufnr = match.group(1)
+            jahr_plus = match.group(2)
+            rest = match.group(3) if match.lastindex >= 3 else ""
+
+            # Extrahiere ersten 2 Ziffern als Jahr
+            if len(jahr_plus) > 2:
+                jahr = jahr_plus[:2]
+                extra_nummern = jahr_plus[2:]
+                return f"{laufnr}/{jahr} {extra_nummern}{rest}"
+            else:
+                return match.group(0)  # Keine Änderung
+
+        # Finde: Laufnr(1-4) / Jahr+ExtraZiffern (3+ Ziffern)
+        text = re.sub(
+            r'\b(\d{1,4})\s*[/IlL\\]\s*(\d{3,})(\s|[/IlL\\]|$)',
+            split_concatenated_numbers,
+            text
+        )
 
         def clean_aktenzeichen_erweitert(match):
             """Bereinigt erweiterte Aktenzeichen: 111/24SQ09/BO"""
@@ -291,20 +316,42 @@ class AktenzeichenErkenner:
 
         def clean_aktenzeichen_mit_kuerzel(match):
             """Bereinigt Aktenzeichen mit Kürzel: 111/24SQ"""
+            full_match = match.group(0)
             g1, g2, g3 = match.groups()
+
             # Entferne Leerzeichen aus Zahlengruppen
             num1 = re.sub(r'\s+', '', g1)
             num2 = re.sub(r'\s+', '', g2)
+
+            # Validierung: num2 muss 1-2 Ziffern sein (nicht nur Leerzeichen)
+            if not num2 or len(num2) > 2:
+                return full_match  # Keine Änderung
+
             kuerzel = g3
-            return f"{num1}/{num2}{kuerzel}"
+
+            # Prüfe ob nach dem Match ein Leerzeichen folgt (um es zu erhalten)
+            trailing_space = " " if full_match.endswith(" ") else ""
+
+            return f"{num1}/{num2}{kuerzel}{trailing_space}"
 
         def clean_aktenzeichen_stamm(match):
             """Bereinigt Aktenzeichen-Stamm: 111/24"""
+            full_match = match.group(0)
             g1, g2 = match.groups()
+
             # Entferne Leerzeichen aus Zahlengruppen
             num1 = re.sub(r'\s+', '', g1)
             num2 = re.sub(r'\s+', '', g2)
-            return f"{num1}/{num2}"
+
+            # Validierung: Beide müssen Ziffern enthalten
+            # num1: 1-4 Ziffern, num2: 1-2 Ziffern
+            if not num1 or not num2 or len(num1) > 4 or len(num2) > 2:
+                return full_match  # Keine Änderung
+
+            # Prüfe ob nach dem Match ein Leerzeichen folgt (um es zu erhalten)
+            trailing_space = " " if full_match.endswith(" ") else ""
+
+            return f"{num1}/{num2}{trailing_space}"
 
         # STRATEGIE: Finde komplette Aktenzeichen-Muster (inkl. Leerzeichen) und bereinige sie
         # WICHTIG: Separatoren [/IlL\\] - aber NICHT "1" (Ziffer)
@@ -327,6 +374,7 @@ class AktenzeichenErkenner:
 
         # Pattern 3: Nur Stamm (ohne Kürzel)
         # z.B. "1 11 / 24" → "111/24"
+        # WICHTIG: Nur wenn BEIDE Gruppen tatsächlich Ziffern enthalten
         text = re.sub(
             r'\b([\d\s]{1,7})\s*[/IlL\\]\s*([\d\s]{1,3})\b',
             clean_aktenzeichen_stamm,
@@ -572,10 +620,21 @@ class AktenzeichenErkenner:
 
                         # Hole Text nach dem Stamm (Suffix)
                         start_pos = stamm_match.end()
-                        suffix = such_text[start_pos:start_pos + 20]  # max 20 Zeichen
+                        suffix = such_text[start_pos:start_pos + 50]  # max 50 Zeichen
 
-                        # Suche Kürzel im Suffix (direkt nach Stamm, ohne Leerzeichen)
+                        # Suche Kürzel im Suffix
+                        # 1. Direkt nach Stamm (ohne Leerzeichen): "1342/24SQ"
                         kuerzel = self._finde_kuerzel_im_text(suffix, position_sensitive=True)
+
+                        # 2. Falls nicht gefunden, suche nach "/ KÜRZEL" Pattern
+                        # z.B. "1342/24 50089 / Li" → extrahiere "Li"
+                        if not kuerzel:
+                            slash_kuerzel_match = re.search(r'[/IlL\\]\s*([A-ZÄÖÜ]{1,3})\b', suffix, re.IGNORECASE)
+                            if slash_kuerzel_match:
+                                kuerzel_text = slash_kuerzel_match.group(1).upper()
+                                # Prüfe ob es ein gültiges Kürzel ist
+                                if kuerzel_text in self.KUERZEL or kuerzel_text in self.KUERZEL_NORMALISIERT:
+                                    kuerzel = kuerzel_text
 
                         if kuerzel:
                             # Kürzel gefunden!
