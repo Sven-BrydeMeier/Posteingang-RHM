@@ -246,7 +246,85 @@ if st.session_state.session_token:
 # LOGIN / REGISTRIERUNG
 # ============================================================================
 
+# Landing-Page State
+if 'show_demo' not in st.session_state:
+    st.session_state.show_demo = False
+
 if not st.session_state.current_user:
+    # Zeige Landing-Page, wenn show_demo=False
+    if not st.session_state.show_demo:
+        # LANDING PAGE
+        st.markdown("""
+        <div style="text-align: center; padding: 2rem 0;">
+            <h1 style="font-size: 3rem; margin-bottom: 1rem;">📄 RHM Posteingangsverarbeitung</h1>
+            <p style="font-size: 1.3rem; color: #666; margin-bottom: 2rem;">
+                Automatisierte KI-gestützte Dokumentenverarbeitung für Kanzleien
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # Features in 3 Spalten
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.markdown("""
+            ### 🤖 KI-Powered
+            - Automatische Aktenzeichen-Erkennung
+            - OCR-tolerante Texterkennung
+            - Intelligente Sachbearbeiter-Zuordnung
+            - Deadline-Erkennung
+            """)
+
+        with col2:
+            st.markdown("""
+            ### 📦 Multi-Format
+            - Multi-PDF-Upload
+            - Automatische Dokumententrennung
+            - RA-MICRO / DATEV Export
+            - ZIP-Download nach Sachbearbeiter
+            """)
+
+        with col3:
+            st.markdown("""
+            ### 🔐 Enterprise-Ready
+            - Multi-User-System
+            - Rollenbasierte Zugriffe
+            - Audit-Logging
+            - Backup-Management
+            """)
+
+        st.markdown("---")
+
+        # Call-to-Action
+        col_left, col_center, col_right = st.columns([1, 2, 1])
+
+        with col_center:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🚀 Zur Demo", type="primary", use_container_width=True, key="demo_button"):
+                st.session_state.show_demo = True
+                st.rerun()
+
+            st.caption(f"Version {VERSION}")
+
+        st.markdown("<br><br>", unsafe_allow_html=True)
+
+        # Footer
+        st.markdown("""
+        <div style="text-align: center; color: #888; margin-top: 3rem;">
+            <p>© 2025 RHM Rechtsanwälte | Entwickelt mit Streamlit & Claude AI</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.stop()  # Stoppe hier, zeige nur Landing-Page
+
+    # LOGIN-BEREICH (wird nur gezeigt wenn show_demo=True)
+    # Zurück-Button zur Landing-Page
+    if st.button("← Zurück zur Startseite", key="back_to_landing"):
+        st.session_state.show_demo = False
+        st.rerun()
+
     st.title("🔐 RHM Posteingang | Login")
     st.caption(f"Version {VERSION}")
     st.markdown("---")
