@@ -554,25 +554,33 @@ class AktenzeichenErkenner:
             'quelle': None
         }
 
-        # Priorität 1: "Ihr Zeichen / Unser Zeichen" etc.
+        # Priorität 1: "Ihr Zeichen / Unser Zeichen" etc. (erweitert auf gesamten Text)
         zeichen_az = self._suche_in_zeichen_feldern(text)
         if zeichen_az:
             result.update(zeichen_az)
             result['quelle'] = 'zeichen_feld'
             return result
 
-        # Priorität 2: Vollmuster im Text
+        # Priorität 2: Vollmuster im gesamten Text (ohne Keyword-Kontext)
         vollmuster = self._suche_vollmuster(text)
         if vollmuster:
             result.update(vollmuster)
             result['quelle'] = 'vollmuster'
             return result
 
-        # Priorität 3: Stämme mit Registertreffer
+        # Priorität 3: Stämme im gesamten Text mit Registertreffer
         register_az = self._suche_stamm_mit_register(text)
         if register_az:
             result.update(register_az)
             result['quelle'] = 'register'
+            return result
+
+        # Priorität 4: Globale Suche nach häufigsten Aktenzeichen-Mustern
+        # (für Fälle wo OCR-Reihenfolge stark abweicht)
+        global_az = self._suche_globale_muster(text)
+        if global_az:
+            result.update(global_az)
+            result['quelle'] = 'global_pattern'
             return result
 
         # Externe Aktenzeichen sammeln (immer)
@@ -585,8 +593,9 @@ class AktenzeichenErkenner:
         Sucht nach Aktenzeichen in "Ihr Zeichen / Unser Zeichen" etc. Zeilen
         Höchste Priorität!
 
-        Erweitert: Durchsucht 2 Zeilen VOR und 2 Zeilen NACH dem Keyword
-        sowie die gleiche Zeile (insgesamt 5 Zeilen Kontext)
+        OCR-robust: Durchsucht den GESAMTEN Text ab dem Keyword
+        (nicht nur ±2 Zeilen), da OCR-Textextraktion oft nicht der
+        visuellen Position folgt.
 
         OCR-tolerant: Normalisiert Text vor der Suche
         """
@@ -599,21 +608,22 @@ class AktenzeichenErkenner:
 
             # Prüfe, ob Zeile ein Zeichen-Keyword enthält
             if any(kw in line_lower for kw in self.ZEICHEN_KEYWORDS):
-                # Suche in den 2 Zeilen VOR, der aktuellen Zeile, und den 2 Zeilen NACH dem Keyword
+                # ERWEITERT: Suche im gesamten Text ab Keyword (wegen OCR-Reihenfolge-Problemen)
+                # Erstelle Suchtext: 5 Zeilen VOR bis ALLE Zeilen NACH dem Keyword
                 such_text = ""
 
-                # 2 Zeilen vorher
-                for offset in range(2, 0, -1):
+                # 5 Zeilen vorher (für Kontext)
+                for offset in range(5, 0, -1):
                     if i - offset >= 0:
                         such_text += lines[i - offset] + " "
 
                 # Aktuelle Zeile
                 such_text += line + " "
 
-                # 2 Zeilen nachher
-                for offset in range(1, 3):
-                    if i + offset < len(lines):
-                        such_text += lines[i + offset] + " "
+                # ALLE Zeilen nach dem Keyword bis zum Ende des Dokuments
+                # (wichtig bei OCR-Reihenfolge-Problemen)
+                for offset in range(1, len(lines) - i):
+                    such_text += lines[i + offset] + " "
 
                 # Erweiterte Regex: Unterstützt verschiedene Formate
                 # Prüfe ZUERST auf erweiterte Formate (mit Bereich + Reno)
@@ -784,6 +794,92 @@ class AktenzeichenErkenner:
             register_info = self._pruefe_register(stamm)
             if register_info:
                 return register_info
+
+        return None
+
+    def _suche_globale_muster(self, text: str) -> Optional[Dict]:
+        """
+        Globale Suche nach Aktenzeichen-Mustern im GESAMTEN Text.
+        Wird als letzte Fallback-Methode verwendet, wenn andere Methoden fehlschlagen.
+
+        Strategie:
+        1. Suche alle Muster im Text
+        2. Zähle Häufigkeiten
+        3. Wähle das häufigste/konsistenteste Muster
+
+        OCR-tolerant: Normalisiert Text vor der Suche
+        """
+        # OCR-Normalisierung
+        text = self._normalisiere_ocr_text(text)
+
+        # Sammle alle gefundenen Aktenzeichen mit Häufigkeit
+        found_patterns = {}
+
+        # Suche nach Vollmustern (mit Kürzel)
+        patterns = self._get_patterns_erweitert() + self._get_patterns_standard()
+
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match_data in matches:
+                # Erweiterte Formate (5 Gruppen)
+                if len(match_data) == 5:
+                    zahl1, zahl2, kuerzel, bereich, reno = match_data
+                    stamm = f"{zahl1}/{zahl2.zfill(2)}"
+                    kuerzel = kuerzel.upper()
+                    kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
+                    internes_az = f"{stamm}{kuerzel_norm}"
+
+                    # Zähle Vorkommen
+                    if internes_az not in found_patterns:
+                        found_patterns[internes_az] = {
+                            'count': 0,
+                            'stamm': stamm,
+                            'kuerzel': kuerzel_norm,
+                            'bereich': bereich,
+                            'reno': reno.upper()
+                        }
+                    found_patterns[internes_az]['count'] += 1
+
+                # Standard-Formate (3 Gruppen)
+                elif len(match_data) == 3:
+                    zahl1, zahl2, kuerzel = match_data
+                    stamm = f"{zahl1}/{zahl2.zfill(2)}"
+                    kuerzel = kuerzel.upper()
+                    kuerzel_norm = self.KUERZEL_NORMALISIERT.get(kuerzel, kuerzel)
+                    internes_az = f"{stamm}{kuerzel_norm}"
+
+                    # Zähle Vorkommen
+                    if internes_az not in found_patterns:
+                        found_patterns[internes_az] = {
+                            'count': 0,
+                            'stamm': stamm,
+                            'kuerzel': kuerzel_norm
+                        }
+                    found_patterns[internes_az]['count'] += 1
+
+        # Wähle das häufigste Muster (mindestens 2 Vorkommen für Konfidenz)
+        if found_patterns:
+            # Sortiere nach Häufigkeit
+            sorted_patterns = sorted(found_patterns.items(), key=lambda x: x[1]['count'], reverse=True)
+
+            # Nehme häufigstes Muster (mindestens 1 Vorkommen)
+            best_az, best_data = sorted_patterns[0]
+
+            result = {
+                'internes_az': best_az,
+                'stamm': best_data['stamm'],
+                'kuerzel': best_data['kuerzel'],
+                'confidence': 'high' if best_data['count'] >= 2 else 'medium'
+            }
+
+            # Füge erweiterte Felder hinzu wenn vorhanden
+            if 'bereich' in best_data:
+                result['bereich'] = best_data['bereich']
+            if 'reno' in best_data:
+                result['reno'] = best_data['reno']
+
+            # Reichere mit Register-Daten an
+            return self._anreichern_mit_register_daten(result)
 
         return None
 
