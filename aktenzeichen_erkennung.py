@@ -575,7 +575,15 @@ class AktenzeichenErkenner:
             result['quelle'] = 'register'
             return result
 
-        # Priorität 4: Globale Suche nach häufigsten Aktenzeichen-Mustern
+        # Priorität 4: Aktenkurzbezeichnung im Text → Aktenzeichen aus Register
+        # (Bidirektionale Verknüpfung)
+        kurzbez_az = self._suche_nach_kurzbezeichnung_im_text(text)
+        if kurzbez_az:
+            result.update(kurzbez_az)
+            result['quelle'] = 'kurzbezeichnung_im_text'
+            return result
+
+        # Priorität 5: Globale Suche nach häufigsten Aktenzeichen-Mustern
         # (für Fälle wo OCR-Reihenfolge stark abweicht)
         global_az = self._suche_globale_muster(text)
         if global_az:
@@ -958,6 +966,62 @@ class AktenzeichenErkenner:
                 result['aktenkurzbezeichnung'] = aktenkurzbezeichnung
 
             return result
+
+        return None
+
+    def _suche_nach_kurzbezeichnung_im_text(self, text: str) -> Optional[Dict]:
+        """
+        Sucht nach Aktenkurzbezeichnungen im Text und findet das zugehörige
+        Aktenzeichen aus dem Register.
+
+        Bidirektionale Verknüpfung:
+        - Kurzbezeichnung im Text → Aktenzeichen aus Register
+
+        Returns:
+            Dict mit internes_az, stamm, kuerzel, aktenkurzbezeichnung
+        """
+        if self.akten_register.empty or 'Akte' not in self.akten_register.columns:
+            return None
+
+        # Mögliche Spalten für Kurzbezeichnung
+        kurzbezeichnung_spalten = ['Kurzbezeichnung', 'Aktenkurzbezeichnung', 'Bez', 'Bezeichnung', 'KurzBez', 'Kurzbez.']
+
+        # Finde alle Kurzbezeichnungen im Register
+        for spalte in kurzbezeichnung_spalten:
+            if spalte not in self.akten_register.columns:
+                continue
+
+            for idx, row in self.akten_register.iterrows():
+                kurzbez = row.get(spalte)
+
+                if pd.isna(kurzbez) or not str(kurzbez).strip():
+                    continue
+
+                kurzbez_str = str(kurzbez).strip()
+
+                # Suche diese Kurzbezeichnung im Text
+                # Verwende Wortgrenzen für präzise Suche
+                if len(kurzbez_str) >= 5:  # Mindestlänge für verlässliche Suche
+                    # Escape special regex characters
+                    kurzbez_escaped = re.escape(kurzbez_str)
+
+                    # Suche case-insensitive
+                    if re.search(rf'\b{kurzbez_escaped}\b', text, re.IGNORECASE):
+                        # Kurzbezeichnung gefunden! Hole zugehöriges AZ
+                        stamm = row.get('Akte')
+                        sb = row.get('SB', 'nicht-zugeordnet')
+                        sb_norm = self.KUERZEL_NORMALISIERT.get(sb, sb)
+
+                        result = {
+                            'internes_az': f"{stamm}{sb_norm}",
+                            'stamm': stamm,
+                            'kuerzel': sb_norm,
+                            'aktenkurzbezeichnung': kurzbez_str,
+                            'register_data': row.to_dict(),
+                            'quelle': 'kurzbezeichnung_im_text'
+                        }
+
+                        return result
 
         return None
 
