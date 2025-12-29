@@ -1,1 +1,35 @@
-streamlit
+# Core Dependencies
+streamlit>=1.28.0
+PyMuPDF>=1.23.0
+pandas>=2.0.0
+openpyxl>=3.1.0
+Pillow>=10.0.0
+
+# AI/LLM APIs
+openai>=1.0.0
+anthropic>=0.7.0
+google-generativeai>=0.3.0
+
+# Security & Authentication
+cryptography>=41.0.0
+bcrypt>=4.0.0
+
+# File Processing & Search
+watchdog>=3.0.0
+whoosh>=2.7.4
+
+# Notifications & Integrations
+requests>=2.31.0
+
+# Visualization
+plotly>=5.17.0
+
+# PDF Generation
+reportlab>=4.0.0
+
+# Optional (nur wenn benötigt):
+# O365>=2.0.0  # Outlook/Exchange
+# google-api-python-client>=2.100.0  # Google Calendar/Drive
+# google-auth-oauthlib>=1.1.0
+# dropbox>=11.36.0
+# plyer>=2.1.0  # Desktop Notifications
