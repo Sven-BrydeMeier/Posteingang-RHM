@@ -588,7 +588,15 @@ class AktenzeichenErkenner:
             result['quelle'] = 'kurzbezeichnung_im_text'
             return result
 
-        # Priorität 5: Globale Suche nach häufigsten Aktenzeichen-Mustern
+        # Priorität 5: Parteibezeichnungen im Text → Aktenzeichen aus Register
+        # (z.B. "Sache Stadtwerke / Müller" findet "Stadtwerke Müller" im Register)
+        parteien_az = self._suche_nach_parteien_im_text(text)
+        if parteien_az:
+            result.update(parteien_az)
+            # quelle wird bereits in der Funktion gesetzt (parteien_im_text oder parteien_fuzzy_match)
+            return result
+
+        # Priorität 6: Globale Suche nach häufigsten Aktenzeichen-Mustern
         # (für Fälle wo OCR-Reihenfolge stark abweicht)
         global_az = self._suche_globale_muster(text)
         if global_az:
@@ -1027,6 +1035,122 @@ class AktenzeichenErkenner:
                         }
 
                         return result
+
+        return None
+
+    def _suche_nach_parteien_im_text(self, text: str) -> Optional[Dict]:
+        """
+        Sucht nach Parteibezeichnungen im Text (z.B. "Müller ./. Stadtwerke")
+        und findet das zugehörige Aktenzeichen aus dem Register.
+
+        Erkennt Muster wie:
+        - "Sache Stadtwerke / Müller"
+        - "Müller ./. Stadtwerke"
+        - "In der Angelegenheit Müller gegen Stadtwerke"
+        - "Stadtwerke Hamburg ./. Müller"
+
+        Verwendet Fuzzy-Matching für ungenaue Übereinstimmungen.
+
+        Returns:
+            Dict mit internes_az, stamm, kuerzel, aktenkurzbezeichnung
+        """
+        if self.akten_register.empty or 'Akte' not in self.akten_register.columns:
+            return None
+
+        # Patterns für Parteibezeichnungen
+        # Format: Partei1 [Trennzeichen] Partei2
+        parteien_patterns = [
+            r'(?:sache|angelegenheit|betreff|re:|in der sache)\s*[:\-]?\s*([^./\n]{3,40})\s*(?:\./\.|/|gegen|vs\.?|v\.)\s*([^./\n]{3,40})',
+            r'([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)*)\s*(?:\./\.|/|gegen|vs\.?|v\.)\s*([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)*)',
+        ]
+
+        gefundene_parteien = []
+
+        for pattern in parteien_patterns:
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                partei1 = match.group(1).strip()
+                partei2 = match.group(2).strip()
+
+                # Bereinige Parteien (entferne Satzzeichen am Ende)
+                partei1 = re.sub(r'[,;.!?]+$', '', partei1).strip()
+                partei2 = re.sub(r'[,;.!?]+$', '', partei2).strip()
+
+                # Mindestlänge für verlässliche Suche
+                if len(partei1) >= 3 and len(partei2) >= 3:
+                    gefundene_parteien.append((partei1, partei2))
+
+        if not gefundene_parteien:
+            return None
+
+        # Durchsuche Register nach passenden Parteien
+        kurzbezeichnung_spalten = ['Kurzbezeichnung', 'Aktenkurzbezeichnung', 'Bez', 'Bezeichnung', 'KurzBez', 'Kurzbez.']
+
+        for partei1, partei2 in gefundene_parteien:
+            # Normalisiere für Vergleich
+            partei1_norm = partei1.lower()
+            partei2_norm = partei2.lower()
+
+            for spalte in kurzbezeichnung_spalten:
+                if spalte not in self.akten_register.columns:
+                    continue
+
+                for idx, row in self.akten_register.iterrows():
+                    kurzbez = row.get(spalte)
+
+                    if pd.isna(kurzbez) or not str(kurzbez).strip():
+                        continue
+
+                    kurzbez_str = str(kurzbez).strip().lower()
+
+                    # Prüfe ob beide Parteien in Kurzbezeichnung vorkommen
+                    # (in beliebiger Reihenfolge)
+                    if partei1_norm in kurzbez_str and partei2_norm in kurzbez_str:
+                        # Treffer! Hole zugehöriges AZ
+                        stamm = row.get('Akte')
+                        sb = row.get('SB', 'nicht-zugeordnet')
+                        sb_norm = self.KUERZEL_NORMALISIERT.get(sb, sb)
+
+                        result = {
+                            'internes_az': f"{stamm}{sb_norm}",
+                            'stamm': stamm,
+                            'kuerzel': sb_norm,
+                            'aktenkurzbezeichnung': str(row.get(spalte)).strip(),
+                            'register_data': row.to_dict(),
+                            'quelle': 'parteien_im_text',
+                            'matched_parties': f"{partei1} / {partei2}"
+                        }
+
+                        return result
+
+                    # Erweiterte Fuzzy-Suche: Prüfe auch einzelne Partei-Matches
+                    # wenn Kurzbezeichnung Format "X ./. Y" hat
+                    if './' in kurzbez_str or ' / ' in kurzbez_str or ' gegen ' in kurzbez_str:
+                        kurzbez_parts = re.split(r'\s*(?:\./\.|/|gegen)\s*', kurzbez_str)
+                        if len(kurzbez_parts) >= 2:
+                            kbez_p1 = kurzbez_parts[0].strip()
+                            kbez_p2 = kurzbez_parts[1].strip()
+
+                            # Prüfe ob Parteien matchen (auch in umgekehrter Reihenfolge)
+                            match1 = (partei1_norm in kbez_p1 and partei2_norm in kbez_p2)
+                            match2 = (partei1_norm in kbez_p2 and partei2_norm in kbez_p1)
+
+                            if match1 or match2:
+                                stamm = row.get('Akte')
+                                sb = row.get('SB', 'nicht-zugeordnet')
+                                sb_norm = self.KUERZEL_NORMALISIERT.get(sb, sb)
+
+                                result = {
+                                    'internes_az': f"{stamm}{sb_norm}",
+                                    'stamm': stamm,
+                                    'kuerzel': sb_norm,
+                                    'aktenkurzbezeichnung': str(row.get(spalte)).strip(),
+                                    'register_data': row.to_dict(),
+                                    'quelle': 'parteien_fuzzy_match',
+                                    'matched_parties': f"{partei1} / {partei2}"
+                                }
+
+                                return result
 
         return None
 
