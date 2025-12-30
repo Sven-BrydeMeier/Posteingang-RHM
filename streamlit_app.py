@@ -1351,7 +1351,23 @@ if st.button("🚀 Verarbeitung starten" if st.session_state.batch_count == 0 el
                         if uploaded_excel:
                             # Neues Excel hochgeladen: Merge mit gespeichertem
                             import pandas as pd
-                            new_df = pd.read_excel(BytesIO(uploaded_excel.read()), sheet_name='akten', header=1)
+
+                            # Automatische Engine-Erkennung basierend auf Dateiendung
+                            filename = uploaded_excel.name.lower()
+                            if filename.endswith('.xlsx'):
+                                engine = 'openpyxl'
+                            elif filename.endswith('.xls'):
+                                engine = 'xlrd'
+                            else:
+                                # Fallback: Versuche openpyxl (häufigster Fall)
+                                engine = 'openpyxl'
+
+                            new_df = pd.read_excel(
+                                BytesIO(uploaded_excel.read()),
+                                sheet_name='akten',
+                                header=1,
+                                engine=engine
+                            )
 
                             # Speichere und merge mit vorhandenem
                             merged_df = storage.save_aktenregister(new_df, merge=storage.has_aktenregister())

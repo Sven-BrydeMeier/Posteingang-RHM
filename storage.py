@@ -165,7 +165,13 @@ class PersistentStorage:
         """
         if merge and self.aktenregister_file.exists():
             # Lade vorhandene Daten
-            existing_df = pd.read_excel(self.aktenregister_file, sheet_name='akten', header=1)
+            # Explizite Engine für bessere Kompatibilität
+            existing_df = pd.read_excel(
+                self.aktenregister_file,
+                sheet_name='akten',
+                header=1,
+                engine='openpyxl'  # Standard für .xlsx Dateien
+            )
 
             # Merge: Neue Zeilen hinzufügen, existierende aktualisieren
             # Annahme: 'Akte' ist der eindeutige Identifier
@@ -202,7 +208,12 @@ class PersistentStorage:
             return None
 
         try:
-            df = pd.read_excel(self.aktenregister_file, sheet_name='akten', header=1)
+            df = pd.read_excel(
+                self.aktenregister_file,
+                sheet_name='akten',
+                header=1,
+                engine='openpyxl'
+            )
             return df
         except Exception as e:
             return None

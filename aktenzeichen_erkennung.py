@@ -185,7 +185,12 @@ class AktenzeichenErkenner:
 
     def _lade_aktenregister(self, excel_path: Path) -> pd.DataFrame:
         """Lädt aktenregister.xlsx, Blatt 'akten'"""
-        df = pd.read_excel(excel_path, sheet_name='akten', header=1)
+        df = pd.read_excel(
+            excel_path,
+            sheet_name='akten',
+            header=1,
+            engine='openpyxl'
+        )
 
         # Prüfe ob erforderliche Spalten vorhanden sind
         if 'Akte' not in df.columns or 'SB' not in df.columns:
