@@ -304,7 +304,7 @@ if not st.session_state.current_user:
             st.markdown("<br>", unsafe_allow_html=True)
 
             # Direkt-Start Button (ohne Login)
-            if st.button("🚀 Demo starten", type="primary", use_container_width=True, key="demo_start_button"):
+            if st.button("🚀 Demo starten", type="primary", width="stretch", key="demo_start_button"):
                 # Erstelle Demo-User Session
                 demo_user = {
                     'id': 'demo_user',
@@ -320,7 +320,7 @@ if not st.session_state.current_user:
             st.markdown("<p style='text-align: center; margin: 1rem 0 0.5rem 0; color: #888;'>oder</p>", unsafe_allow_html=True)
 
             # Optionaler Login-Button
-            if st.button("🔐 Mit Account anmelden", use_container_width=True, key="login_button"):
+            if st.button("🔐 Mit Account anmelden", width="stretch", key="login_button"):
                 st.session_state.show_demo = True
                 st.rerun()
 
@@ -361,7 +361,7 @@ if not st.session_state.current_user:
         col1, col2 = st.columns([1, 3])
 
         with col1:
-            if st.button("🔓 Login", type="primary", use_container_width=True):
+            if st.button("🔓 Login", type="primary", width="stretch"):
                 if login_email and login_password:
                     user = user_manager.authenticate(login_email, login_password)
 
@@ -514,7 +514,7 @@ with col_h2:
 
 with col_h3:
     st.write("")  # Spacing
-    if st.button("🚪 Logout", use_container_width=True):
+    if st.button("🚪 Logout", width="stretch"):
         user_manager.logout(st.session_state.session_token)
         st.session_state.session_token = None
         st.session_state.current_user = None
@@ -904,21 +904,21 @@ with st.sidebar.expander("⚙️ Einstellungen"):
     # Schnell-Auswahl
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("24h", use_container_width=True):
+        if st.button("24h", width="stretch"):
             trash_manager.set_retention_hours(24)
             st.rerun()
     with col2:
-        if st.button("48h", use_container_width=True):
+        if st.button("48h", width="stretch"):
             trash_manager.set_retention_hours(48)
             st.rerun()
 
     col3, col4 = st.columns(2)
     with col3:
-        if st.button("7 Tage", use_container_width=True):
+        if st.button("7 Tage", width="stretch"):
             trash_manager.set_retention_hours(168)
             st.rerun()
     with col4:
-        if st.button("30 Tage", use_container_width=True):
+        if st.button("30 Tage", width="stretch"):
             trash_manager.set_retention_hours(720)
             st.rerun()
 
@@ -1565,14 +1565,14 @@ if st.session_state.get('batch_verarbeitet', False):
     col_btn1, col_btn2 = st.columns(2, gap="medium")
 
     with col_btn1:
-        if st.button("📄 Weitere Datei einlesen und hinzufügen", type="secondary", use_container_width=True):
+        if st.button("📄 Weitere Datei einlesen und hinzufügen", type="secondary", width="stretch"):
             # Lösche nur Upload-bezogene Session States, behalte akkumulierte Daten
             st.session_state.batch_verarbeitet = False
             # File uploader wird automatisch zurückgesetzt durch rerun
             st.rerun()
 
     with col_btn2:
-        if st.button("📦 Postscan beenden und ZIP-Dateien erstellen", type="primary", use_container_width=True):
+        if st.button("📦 Postscan beenden und ZIP-Dateien erstellen", type="primary", width="stretch"):
             # Starte finale Verarbeitung
             with st.spinner("📦 Erstelle finale ZIP-Dateien aus allen Batches..."):
                 try:
@@ -1680,7 +1680,7 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
                     file_name=f"{sb}.zip",
                     mime="application/zip",
                     key=f"download_zip_{sb}",
-                    use_container_width=True,
+                    width="stretch",
                     help=f"{ergebnisse['sachbearbeiter_stats'][sb]} Dokumente"
                 )
 
@@ -1692,7 +1692,7 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
             file_name="Fristen_und_Akten_Gesamt.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="download_gesamt_excel",
-            use_container_width=False
+            width="content"
         )
 
         # Kanzleisoftware-Export
@@ -2220,7 +2220,7 @@ if trash_items:
 
                 with col_actions:
                     # Wiederherstellen
-                    if st.button("♻️ Wiederherstellen", key=f"restore_{item['trash_id']}", use_container_width=True):
+                    if st.button("♻️ Wiederherstellen", key=f"restore_{item['trash_id']}", width="stretch"):
                         try:
                             trash_manager.restore_from_trash(item['trash_id'])
                             st.success(f"✅ '{item['name']}' wiederhergestellt!")
@@ -2229,13 +2229,13 @@ if trash_items:
                             st.error(f"❌ Fehler: {e}")
 
                     # Endgültig löschen
-                    if st.button("🗑️ Löschen", key=f"delete_{item['trash_id']}", use_container_width=True):
+                    if st.button("🗑️ Löschen", key=f"delete_{item['trash_id']}", width="stretch"):
                         if trash_manager.permanent_delete(item['trash_id']):
                             st.success(f"✅ '{item['name']}' endgültig gelöscht!")
                             st.rerun()
 
                     # Verlängern
-                    if st.button("⏰ +24h", key=f"extend_{item['trash_id']}", use_container_width=True):
+                    if st.button("⏰ +24h", key=f"extend_{item['trash_id']}", width="stretch"):
                         if trash_manager.extend_retention(item['trash_id'], 24):
                             st.success(f"✅ Aufbewahrung verlängert!")
                             st.rerun()
@@ -2248,7 +2248,7 @@ if trash_items:
         col_mass1, col_mass2, col_mass3 = st.columns(3)
 
         with col_mass1:
-            if st.button("♻️ Alles wiederherstellen", type="secondary", use_container_width=True):
+            if st.button("♻️ Alles wiederherstellen", type="secondary", width="stretch"):
                 restored_count = 0
                 for item in trash_items:
                     try:
@@ -2260,13 +2260,13 @@ if trash_items:
                 st.rerun()
 
         with col_mass2:
-            if st.button("🗑️ Papierkorb leeren", type="secondary", use_container_width=True):
+            if st.button("🗑️ Papierkorb leeren", type="secondary", width="stretch"):
                 deleted_count = trash_manager.empty_trash()
                 st.success(f"✅ {deleted_count} Dokument(e) endgültig gelöscht!")
                 st.rerun()
 
         with col_mass3:
-            if st.button("🧹 Nur Abgelaufene löschen", type="secondary", use_container_width=True):
+            if st.button("🧹 Nur Abgelaufene löschen", type="secondary", width="stretch"):
                 deleted_count = trash_manager.cleanup_expired()
                 st.success(f"✅ {deleted_count} abgelaufene Dokument(e) gelöscht!")
                 st.rerun()
@@ -2352,7 +2352,7 @@ with tab1:
                     yaxis_title="Anzahl Dokumente",
                     height=300
                 )
-                st.plotly_chart(fig_timeline, use_container_width=True)
+                st.plotly_chart(fig_timeline, width="stretch")
 
         with col_b:
             st.subheader("Verteilung Sachbearbeiter")
@@ -2363,7 +2363,7 @@ with tab1:
                     title="Dokumente pro Sachbearbeiter"
                 )
                 fig_sb.update_layout(height=300)
-                st.plotly_chart(fig_sb, use_container_width=True)
+                st.plotly_chart(fig_sb, width="stretch")
 
         # Prioritäten
         st.markdown("---")
@@ -2391,7 +2391,7 @@ with tab1:
                 yaxis_title="Anzahl",
                 height=300
             )
-            st.plotly_chart(fig_deadlines, use_container_width=True)
+            st.plotly_chart(fig_deadlines, width="stretch")
 
         with col_d:
             # API-Nutzung
@@ -2404,7 +2404,7 @@ with tab1:
                     labels={'x': 'Provider', 'y': 'Anzahl Aufrufe'}
                 )
                 fig_api.update_layout(height=300)
-                st.plotly_chart(fig_api, use_container_width=True)
+                st.plotly_chart(fig_api, width="stretch")
 
     except ImportError:
         st.warning("⚠️ Plotly nicht installiert. Installieren Sie mit: pip install plotly")
@@ -2573,12 +2573,12 @@ with tab4:
         col1, col2 = st.columns(2)
 
         with col1:
-            imap_server = st.text_input("IMAP-Server:", value="imap.gmail.com")
-            imap_username = st.text_input("Email:")
+            imap_server = st.text_input("IMAP-Server:", value="imap.gmail.com", key="email_import_imap_server")
+            imap_username = st.text_input("Email:", key="email_import_username")
 
         with col2:
-            imap_port = st.number_input("Port:", value=993)
-            imap_password = st.text_input("Passwort:", type="password")
+            imap_port = st.number_input("Port:", value=993, key="email_import_port")
+            imap_password = st.text_input("Passwort:", type="password", key="email_import_password")
 
         if st.button("💾 IMAP Konfigurieren"):
             email_imp.configure(imap_server, imap_username, imap_password, imap_port)
@@ -2703,14 +2703,14 @@ with tab6:
         col1, col2 = st.columns(2)
 
         with col1:
-            smtp_server = st.text_input("SMTP-Server:", value="smtp.gmail.com")
-            smtp_port = st.number_input("SMTP-Port:", value=587)
-            smtp_user = st.text_input("Benutzername:")
+            smtp_server = st.text_input("SMTP-Server:", value="smtp.gmail.com", key="notif_smtp_server")
+            smtp_port = st.number_input("SMTP-Port:", value=587, key="notif_smtp_port")
+            smtp_user = st.text_input("Benutzername:", key="notif_smtp_user")
 
         with col2:
-            smtp_pass = st.text_input("Passwort:", type="password")
-            email_from = st.text_input("Absender-Email:")
-            recipients = st.text_input("Empfänger (kommagetrennt):")
+            smtp_pass = st.text_input("Passwort:", type="password", key="notif_smtp_pass")
+            email_from = st.text_input("Absender-Email:", key="notif_email_from")
+            recipients = st.text_input("Empfänger (kommagetrennt):", key="notif_recipients")
 
         if st.button("💾 Email-Benachrichtigungen konfigurieren"):
             recipient_list = [r.strip() for r in recipients.split(',')]
