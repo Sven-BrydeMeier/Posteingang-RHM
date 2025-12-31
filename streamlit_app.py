@@ -1480,6 +1480,18 @@ if st.button("🚀 Verarbeitung starten" if st.session_state.batch_count == 0 el
                                     az_text += f" [{kurzbez}]"
 
                                 debug_parts.append(az_text)
+                            elif akt_info.get('az_vorschlaege'):
+                                # Mehrere AZ-Vorschläge basierend auf Beteiligten
+                                vorschlaege = akt_info['az_vorschlaege']
+                                debug_parts.append(f"⚠️ AZ: {len(vorschlaege)} Vorschläge gefunden")
+
+                                # Zeige Top-3 Vorschläge inline
+                                for idx, v in enumerate(vorschlaege[:3], 1):
+                                    matched = ", ".join(v['matched_beteiligte'])
+                                    kurzbez = v.get('aktenkurzbezeichnung', 'keine Bez.')
+                                    if len(kurzbez) > 30:
+                                        kurzbez = kurzbez[:27] + "..."
+                                    st.text(f"   {idx}. {v['internes_az']} [{kurzbez}] - Treffer: {matched}")
                             else:
                                 debug_parts.append("AZ: nicht erkannt")
 

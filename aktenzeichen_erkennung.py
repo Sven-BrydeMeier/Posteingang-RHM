@@ -604,6 +604,25 @@ class AktenzeichenErkenner:
             result['quelle'] = 'global_pattern'
             return result
 
+        # Priorität 7: Beteiligten-basierter Abgleich (Fallback wenn kein AZ erkannt)
+        # Extrahiere Beteiligte aus dem Text
+        beteiligte = self._erkenne_beteiligte_im_text(text)
+        if beteiligte:
+            # Finde passende Akten im Register
+            treffer = self._finde_akten_nach_beteiligten(beteiligte)
+
+            if len(treffer) == 1:
+                # EINDEUTIGE Zuordnung → Verwende AZ automatisch
+                result.update(treffer[0])
+                result['quelle'] = 'beteiligte_eindeutig'
+                result.pop('score', None)  # Entferne Score aus Ergebnis
+                return result
+            elif len(treffer) > 1:
+                # MEHRERE Treffer → Gib Vorschläge zurück
+                result['az_vorschlaege'] = treffer  # Liste von Vorschlägen mit Score
+                result['quelle'] = 'beteiligte_mehrfach'
+                # Kein internes_az gesetzt, da nicht eindeutig
+
         # Externe Aktenzeichen sammeln (immer)
         result['externe_az'] = self._suche_externe_aktenzeichen(text)
 
@@ -1340,3 +1359,160 @@ class AktenzeichenErkenner:
             return info
 
         return None
+
+    def _erkenne_beteiligte_im_text(self, text: str) -> List[str]:
+        """
+        Extrahiert mögliche Beteiligte (Personen, Firmen) aus dem Text.
+
+        Sucht nach:
+        - Namen in typischen Kontexten (Absender, Empfänger, Betreff)
+        - Firmennamen (GmbH, AG, e.V., etc.)
+        - Personen mit Titeln (Dr., Prof., etc.)
+
+        Returns:
+            Liste von erkannten Beteiligten
+        """
+        beteiligte = []
+
+        # 1. Firmennamen erkennen (mit Rechtsform)
+        firmen_patterns = [
+            r'([A-ZÄÖÜ][a-zäöüß\s&-]+(?:GmbH|AG|e\.V\.|KG|OHG|PartG|mbH|UG))',
+            r'([A-ZÄÖÜ][a-zäöüß\s&-]+(?:Gesellschaft|Versicherung|Bank|Sparkasse|Stadtwerke|Gemeinde|Stadt))',
+        ]
+
+        for pattern in firmen_patterns:
+            matches = re.findall(pattern, text, re.MULTILINE)
+            for match in matches:
+                firma = match.strip()
+                if len(firma) >= 5:  # Mindestlänge
+                    beteiligte.append(firma)
+
+        # 2. Personen mit Titeln
+        personen_patterns = [
+            r'(?:Dr\.|Prof\.|Dipl\.-Ing\.|RA|RAin)\s+([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)',
+            r'(?:Herr|Frau)\s+(?:Dr\.\s+)?([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)',
+        ]
+
+        for pattern in personen_patterns:
+            matches = re.findall(pattern, text, re.MULTILINE)
+            for match in matches:
+                person = match.strip()
+                if len(person) >= 3:
+                    beteiligte.append(person)
+
+        # 3. Namen aus typischen Kontexten
+        kontext_patterns = [
+            r'(?:Absender|Von|From):\s*([A-ZÄÖÜ][a-zäöüß\s&-]+)',
+            r'(?:Mandant|Auftraggeber):\s*([A-ZÄÖÜ][a-zäöüß\s&-]+)',
+            r'(?:Gegner|Beklagter|Kläger):\s*([A-ZÄÖÜ][a-zäöüß\s&-]+)',
+            r'(?:Betreff|Betrifft|Re):\s*.*?([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)',
+        ]
+
+        for pattern in kontext_patterns:
+            matches = re.findall(pattern, text[:2000], re.MULTILINE)  # Nur erste 2000 Zeichen
+            for match in matches:
+                name = match.strip()
+                # Bereinige (entferne Satzzeichen am Ende)
+                name = re.sub(r'[,;:.!?]+$', '', name).strip()
+                if len(name) >= 3 and len(name) <= 50:
+                    beteiligte.append(name)
+
+        # Deduplizierung und Normalisierung
+        beteiligte_unique = []
+        seen = set()
+
+        for b in beteiligte:
+            b_norm = b.lower().strip()
+            if b_norm not in seen and len(b_norm) >= 3:
+                seen.add(b_norm)
+                beteiligte_unique.append(b)
+
+        return beteiligte_unique
+
+    def _finde_akten_nach_beteiligten(self, beteiligte: List[str]) -> List[Dict]:
+        """
+        Findet passende Akten im Register basierend auf Beteiligten.
+
+        Args:
+            beteiligte: Liste von erkannten Beteiligten aus dem Text
+
+        Returns:
+            Liste von Treffern mit Score (sortiert nach Relevanz)
+            Jeder Treffer: {'az': ..., 'stamm': ..., 'kuerzel': ..., 'score': ...,
+                           'matched_beteiligte': [...], 'aktenkurzbezeichnung': ...}
+        """
+        if not beteiligte or self.akten_register.empty:
+            return []
+
+        treffer = []
+        kurzbezeichnung_spalten = ['Kurzbezeichnung', 'Aktenkurzbezeichnung', 'Bez', 'Bezeichnung', 'KurzBez', 'Kurzbez.']
+
+        # Durchsuche jede Akte im Register
+        for idx, row in self.akten_register.iterrows():
+            stamm = row.get('Akte')
+            if pd.isna(stamm):
+                continue
+
+            # Sammle alle suchbaren Texte aus der Akte
+            akte_texte = []
+
+            # Kurzbezeichnung
+            for spalte in kurzbezeichnung_spalten:
+                if spalte in self.akten_register.columns:
+                    wert = row.get(spalte)
+                    if pd.notna(wert) and str(wert).strip():
+                        akte_texte.append(str(wert).strip().lower())
+
+            # Weitere relevante Spalten
+            for spalte in ['Mandant', 'Gegner', 'Bemerkung', 'Notiz']:
+                if spalte in self.akten_register.columns:
+                    wert = row.get(spalte)
+                    if pd.notna(wert) and str(wert).strip():
+                        akte_texte.append(str(wert).strip().lower())
+
+            if not akte_texte:
+                continue
+
+            # Prüfe, wie viele Beteiligte in dieser Akte vorkommen
+            matched_beteiligte = []
+            for beteiligter in beteiligte:
+                beteiligter_norm = beteiligter.lower()
+
+                # Prüfe ob Beteiligter in einem der Akte-Texte vorkommt
+                for akte_text in akte_texte:
+                    if beteiligter_norm in akte_text:
+                        matched_beteiligte.append(beteiligter)
+                        break
+
+            # Wenn mindestens ein Beteiligter matched
+            if matched_beteiligte:
+                sb = row.get('SB', 'nicht-zugeordnet')
+                sb_norm = self.KUERZEL_NORMALISIERT.get(sb, sb)
+
+                # Hole Kurzbezeichnung
+                aktenkurzbezeichnung = None
+                for spalte in kurzbezeichnung_spalten:
+                    if spalte in self.akten_register.columns:
+                        wert = row.get(spalte)
+                        if pd.notna(wert) and str(wert).strip():
+                            aktenkurzbezeichnung = str(wert).strip()
+                            break
+
+                # Score: Anzahl gematchter Beteiligter
+                score = len(matched_beteiligte)
+
+                treffer.append({
+                    'internes_az': f"{stamm}{sb_norm}",
+                    'stamm': stamm,
+                    'kuerzel': sb_norm,
+                    'aktenkurzbezeichnung': aktenkurzbezeichnung,
+                    'register_data': row.to_dict(),
+                    'score': score,
+                    'matched_beteiligte': matched_beteiligte,
+                    'quelle': 'beteiligte_abgleich'
+                })
+
+        # Sortiere nach Score (höchster zuerst)
+        treffer.sort(key=lambda x: x['score'], reverse=True)
+
+        return treffer
