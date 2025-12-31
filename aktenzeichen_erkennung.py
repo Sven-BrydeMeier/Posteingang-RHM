@@ -184,13 +184,36 @@ class AktenzeichenErkenner:
         self._load_custom_kuerzel()
 
     def _lade_aktenregister(self, excel_path: Path) -> pd.DataFrame:
-        """Lädt aktenregister.xlsx, Blatt 'akten'"""
-        df = pd.read_excel(
-            excel_path,
-            sheet_name='akten',
-            header=1,
-            engine='openpyxl'
-        )
+        """Lädt aktenregister.xlsx, Blatt 'akten' mit automatischer Header-Erkennung"""
+
+        # Versuche verschiedene Header-Zeilen (0, 1, 2)
+        for header_row in [1, 0, 2]:
+            try:
+                df = pd.read_excel(
+                    excel_path,
+                    sheet_name='akten',
+                    header=header_row,
+                    engine='openpyxl'
+                )
+
+                # Prüfe ob Spalten sinnvoll sind (nicht nur "Unnamed")
+                unnamed_count = sum(1 for col in df.columns if str(col).startswith('Unnamed'))
+                total_cols = len(df.columns)
+
+                # Wenn weniger als 50% "Unnamed" Spalten, ist es wahrscheinlich der richtige Header
+                if unnamed_count < total_cols * 0.5:
+                    print(f"✓ Header in Zeile {header_row} gefunden")
+                    break
+            except Exception as e:
+                continue
+        else:
+            # Fallback: Verwende header=1
+            df = pd.read_excel(
+                excel_path,
+                sheet_name='akten',
+                header=1,
+                engine='openpyxl'
+            )
 
         # Prüfe ob erforderliche Spalten vorhanden sind
         if 'Akte' not in df.columns or 'SB' not in df.columns:
