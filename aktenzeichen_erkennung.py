@@ -907,12 +907,14 @@ class AktenzeichenErkenner:
     def _anreichern_mit_register_daten(self, result: Dict) -> Dict:
         """
         Reichert ein Ergebnis mit Daten aus dem Register an (falls vorhanden).
+        WICHTIG: Verwendet IMMER das Kürzel aus dem Register (falls vorhanden),
+        nicht das aus dem Text extrahierte.
 
         Args:
-            result: Dict mit 'stamm' und 'kuerzel'
+            result: Dict mit 'stamm' und optional 'kuerzel'
 
         Returns:
-            Angereichertes Dict mit 'aktenkurzbezeichnung' (falls im Register gefunden)
+            Angereichertes Dict mit Register-Kürzel, Aktenkurzbezeichnung und register_data
         """
         if not result or 'stamm' not in result:
             return result
@@ -928,6 +930,15 @@ class AktenzeichenErkenner:
         if not treffer.empty:
             row = treffer.iloc[0]
 
+            # WICHTIG: Verwende Kürzel aus Register (überschreibt Text-Kürzel)
+            sb = row.get('SB', 'nicht-zugeordnet')
+            sb_norm = self.KUERZEL_NORMALISIERT.get(sb, sb)
+
+            # Aktualisiere Kürzel und internes_az mit Register-Daten
+            result['kuerzel'] = sb_norm
+            result['internes_az'] = f"{stamm}{sb_norm}"
+            result['register_data'] = row.to_dict()
+
             # Suche nach Aktenkurzbezeichnung
             kurzbezeichnung_spalten = ['Kurzbezeichnung', 'Aktenkurzbezeichnung', 'Bez', 'Bezeichnung', 'KurzBez']
 
@@ -937,6 +948,10 @@ class AktenzeichenErkenner:
                     if pd.notna(wert) and str(wert).strip():
                         result['aktenkurzbezeichnung'] = str(wert).strip()
                         break
+
+            # Markiere, dass Register verwendet wurde
+            if result.get('quelle'):
+                result['quelle'] = f"{result['quelle']}_mit_register"
 
         return result
 

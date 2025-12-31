@@ -1469,7 +1469,17 @@ if st.button("🚀 Verarbeitung starten" if st.session_state.batch_count == 0 el
                             # Aktenzeichen-Info
                             if akt_info.get('internes_az'):
                                 az_quelle = akt_info.get('quelle', 'unbekannt')
-                                debug_parts.append(f"AZ: {akt_info['internes_az']} ({az_quelle})")
+                                az_text = f"AZ: {akt_info['internes_az']} ({az_quelle})"
+
+                                # Zeige Kurzbezeichnung aus Register, falls vorhanden
+                                if akt_info.get('aktenkurzbezeichnung'):
+                                    kurzbez = akt_info['aktenkurzbezeichnung']
+                                    # Kürze sehr lange Kurzbezeichnungen
+                                    if len(kurzbez) > 40:
+                                        kurzbez = kurzbez[:37] + "..."
+                                    az_text += f" [{kurzbez}]"
+
+                                debug_parts.append(az_text)
                             else:
                                 debug_parts.append("AZ: nicht erkannt")
 
