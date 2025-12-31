@@ -1900,11 +1900,25 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
         if 'alle_daten' in st.session_state and st.session_state.get('alle_daten'):
             alle_daten = st.session_state.alle_daten
 
-            # Filtere nicht-zugeordnete Dokumente
-            nicht_zugeordnet = [d for d in alle_daten if d['sachbearbeiter'] == 'nicht-zugeordnet']
+            # Filtere nicht-zugeordnete Dokumente ODER Dokumente mit AZ-Vorschlägen
+            nicht_zugeordnet = [
+                d for d in alle_daten
+                if d['sachbearbeiter'] == 'nicht-zugeordnet'
+                or d.get('aktenzeichen_info', {}).get('az_vorschlaege')  # AZ-Vorschläge vorhanden
+            ]
 
             if nicht_zugeordnet:
-                st.warning(f"⚠️ {len(nicht_zugeordnet)} Dokument(e) konnten nicht automatisch zugeordnet werden.")
+                # Zähle Dokumente mit Vorschlägen separat
+                mit_vorschlaegen = sum(1 for d in nicht_zugeordnet if d.get('aktenzeichen_info', {}).get('az_vorschlaege'))
+                ohne_az = len(nicht_zugeordnet) - mit_vorschlaegen
+
+                if mit_vorschlaegen > 0 and ohne_az > 0:
+                    st.warning(f"⚠️ {len(nicht_zugeordnet)} Dokument(e) zur manuellen Zuordnung: "
+                              f"{mit_vorschlaegen} mit AZ-Vorschlägen, {ohne_az} ohne erkanntes AZ")
+                elif mit_vorschlaegen > 0:
+                    st.warning(f"📋 {mit_vorschlaegen} Dokument(e) mit AZ-Vorschlägen zur Auswahl")
+                else:
+                    st.warning(f"⚠️ {ohne_az} Dokument(e) konnten nicht automatisch zugeordnet werden.")
                 st.info("👉 Sie können diese Dokumente jetzt manuell zuordnen. Das System lernt aus Ihren Zuordnungen!")
 
                 with st.expander(f"📋 {len(nicht_zugeordnet)} nicht-zugeordnete Dokumente bearbeiten", expanded=False):
@@ -1953,6 +1967,55 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
                             # Extrahiere Absender aus Analyse
                             absender = current_doc['analyse'].get('gegner', 'Unbekannt')
                             st.info(f"**Absender**: {absender}")
+
+                            # PRIORITÄT 0: AZ-Vorschläge aus Beteiligten-Abgleich anzeigen
+                            az_vorschlaege = current_doc['aktenzeichen_info'].get('az_vorschlaege', [])
+                            if az_vorschlaege:
+                                st.warning(f"📋 **{len(az_vorschlaege)} AZ-Vorschläge** basierend auf erkannten Beteiligten:")
+
+                                for v_idx, vorschlag in enumerate(az_vorschlaege[:5]):  # Max 5 Vorschläge
+                                    matched = ", ".join(vorschlag.get('matched_beteiligte', []))
+                                    kurzbez = vorschlag.get('aktenkurzbezeichnung', 'keine Bez.')
+                                    if len(kurzbez) > 35:
+                                        kurzbez = kurzbez[:32] + "..."
+
+                                    col_v1, col_v2 = st.columns([3, 1])
+                                    with col_v1:
+                                        st.text(f"{v_idx+1}. {vorschlag['internes_az']} [{kurzbez}]")
+                                        st.caption(f"   Treffer: {matched} (Score: {vorschlag.get('score', 0)})")
+                                    with col_v2:
+                                        if st.button("Übernehmen", key=f"az_vorschlag_{current_index}_{v_idx}"):
+                                            # AZ-Vorschlag übernehmen
+                                            current_doc['aktenzeichen_info'] = vorschlag
+                                            current_doc['sachbearbeiter'] = vorschlag['kuerzel']
+
+                                            # Dateiname neu generieren
+                                            from aktenzeichen_erkennung import AktenzeichenErkenner
+                                            if storage.has_aktenregister():
+                                                excel_path = storage.aktenregister_file
+                                                erkenner = AktenzeichenErkenner(excel_path, storage=storage)
+                                                neuer_dateiname = erkenner.generiere_dateiname(
+                                                    vorschlag.get('internes_az'),
+                                                    current_doc['analyse'].get('mandant'),
+                                                    current_doc['analyse'].get('gegner'),
+                                                    current_doc['analyse'].get('datum'),
+                                                    current_doc['analyse'].get('stichworte', []),
+                                                    aktenkurzbezeichnung=vorschlag.get('aktenkurzbezeichnung')
+                                                )
+                                                current_doc['dateiname'] = neuer_dateiname
+
+                                            # Training speichern
+                                            training_db.save_training_entry(
+                                                absender=absender,
+                                                aktenzeichen=vorschlag['internes_az'],
+                                                sachbearbeiter=vorschlag['kuerzel']
+                                            )
+
+                                            st.success(f"AZ {vorschlag['internes_az']} übernommen!")
+                                            st.session_state.current_manual_doc_index += 1
+                                            st.rerun()
+
+                                st.markdown("---")
 
                             # Prüfe ob Training-Daten vorhanden
                             pattern = training_db.find_matching_pattern(absender)
