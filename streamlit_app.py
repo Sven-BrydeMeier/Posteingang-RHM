@@ -1289,6 +1289,32 @@ if st.button("🚀 Verarbeitung starten" if st.session_state.batch_count == 0 el
         if total_files > 1:
             st.info(f"📦 **{total_files} PDF-Dateien werden nacheinander verarbeitet**")
 
+        # Aktenregister EINMALIG vorbereiten (VOR der PDF-Schleife)
+        if uploaded_excel:
+            # Neues Excel hochgeladen: Merge mit gespeichertem
+            import pandas as pd
+
+            # Automatische Engine-Erkennung basierend auf Dateiendung
+            filename = uploaded_excel.name.lower()
+            if filename.endswith('.xlsx'):
+                engine = 'openpyxl'
+            elif filename.endswith('.xls'):
+                engine = 'xlrd'
+            else:
+                # Fallback: Versuche openpyxl (häufigster Fall)
+                engine = 'openpyxl'
+
+            new_df = pd.read_excel(
+                BytesIO(uploaded_excel.read()),
+                sheet_name='akten',
+                header=1,
+                engine=engine
+            )
+
+            # Speichere und merge mit vorhandenem
+            merged_df = storage.save_aktenregister(new_df, merge=storage.has_aktenregister())
+            st.success(f"✅ Aktenregister aktualisiert: {len(merged_df)} Akten")
+
         # Verarbeite jede PDF-Datei nacheinander
         for file_index, uploaded_pdf in enumerate(pdf_files, start=1):
             # Zeige aktuellen Datei-Fortschritt
@@ -1348,38 +1374,11 @@ if st.button("🚀 Verarbeitung starten" if st.session_state.batch_count == 0 el
                         status_text.text("📊 Lade Aktenregister...")
                         progress_bar.progress(10)
 
-                        if uploaded_excel:
-                            # Neues Excel hochgeladen: Merge mit gespeichertem
-                            import pandas as pd
-
-                            # Automatische Engine-Erkennung basierend auf Dateiendung
-                            filename = uploaded_excel.name.lower()
-                            if filename.endswith('.xlsx'):
-                                engine = 'openpyxl'
-                            elif filename.endswith('.xls'):
-                                engine = 'xlrd'
-                            else:
-                                # Fallback: Versuche openpyxl (häufigster Fall)
-                                engine = 'openpyxl'
-
-                            new_df = pd.read_excel(
-                                BytesIO(uploaded_excel.read()),
-                                sheet_name='akten',
-                                header=1,
-                                engine=engine
-                            )
-
-                            # Speichere und merge mit vorhandenem
-                            merged_df = storage.save_aktenregister(new_df, merge=storage.has_aktenregister())
-                            st.success(f"✅ Aktenregister aktualisiert: {len(merged_df)} Akten")
-
-                            # Verwende gespeicherte Version
-                            excel_path = storage.aktenregister_file
-                        else:
-                            # Verwende nur gespeichertes Register
-                            excel_path = storage.aktenregister_file
-                            df = storage.load_aktenregister()
-                            st.info(f"📂 Verwende gespeichertes Register: {len(df)} Akten")
+                        # Verwende gespeichertes Register (wurde bereits vor der Schleife verarbeitet)
+                        excel_path = storage.aktenregister_file
+                        df = storage.load_aktenregister()
+                        if file_index == 1:  # Nur bei erster PDF anzeigen
+                            st.info(f"📂 Verwende Aktenregister: {len(df)} Akten")
 
                         erkenner = AktenzeichenErkenner(excel_path, storage=storage)
 
