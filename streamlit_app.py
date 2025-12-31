@@ -397,6 +397,62 @@ if not st.session_state.current_user:
                 else:
                     st.error("❌ Fehler beim Zurücksetzen der Demo-Benutzer")
 
+        # TESTPHASE: Quick-Login-Buttons ohne Passwort-Eingabe
+        st.markdown("---")
+        st.markdown("#### 🧪 Schnell-Login (Testphase)")
+        st.caption("Klicken Sie auf einen Button, um sich direkt einzuloggen:")
+
+        col_q1, col_q2, col_q3 = st.columns(3)
+
+        with col_q1:
+            if st.button("👤 Als Admin anmelden", key="quick_login_admin", type="secondary"):
+                user = user_manager.authenticate("admin@rhm-kanzlei.de", "admin123")
+                if user:
+                    session_token = user_manager.create_session(user['id'])
+                    st.session_state.session_token = session_token
+                    st.session_state.current_user = user
+                    st.success(f"✅ Willkommen, {user['name']}!")
+                    st.rerun()
+                else:
+                    st.error("❌ Admin-Login fehlgeschlagen. Bitte Demo-Benutzer zurücksetzen.")
+
+        with col_q2:
+            if st.button("📬 Als Empfang anmelden", key="quick_login_empfang", type="secondary"):
+                user = user_manager.authenticate("empfang@rhm-kanzlei.de", "empfang123")
+                if user:
+                    session_token = user_manager.create_session(user['id'])
+                    st.session_state.session_token = session_token
+                    st.session_state.current_user = user
+                    st.success(f"✅ Willkommen, {user['name']}!")
+                    st.rerun()
+                else:
+                    st.error("❌ Empfang-Login fehlgeschlagen. Bitte Demo-Benutzer zurücksetzen.")
+
+        with col_q3:
+            # Erstelle Demo-Rechtsanwalt falls nicht vorhanden
+            if st.button("⚖️ Als Anwalt anmelden", key="quick_login_anwalt", type="secondary"):
+                # Prüfe ob Demo-Anwalt existiert
+                demo_anwalt = user_manager.get_user_by_email("anwalt@rhm-kanzlei.de")
+                if not demo_anwalt:
+                    # Erstelle Demo-Anwalt
+                    user_manager.create_user(
+                        email="anwalt@rhm-kanzlei.de",
+                        password="anwalt123",
+                        role="Rechtsanwalt",
+                        name="Demo Rechtsanwalt",
+                        kuerzel="SQ"
+                    )
+
+                user = user_manager.authenticate("anwalt@rhm-kanzlei.de", "anwalt123")
+                if user:
+                    session_token = user_manager.create_session(user['id'])
+                    st.session_state.session_token = session_token
+                    st.session_state.current_user = user
+                    st.success(f"✅ Willkommen, {user['name']}!")
+                    st.rerun()
+                else:
+                    st.error("❌ Anwalt-Login fehlgeschlagen.")
+
     with tab2:
         st.subheader("✉️ Registrierung mit Einladung")
 
