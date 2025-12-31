@@ -1383,6 +1383,98 @@ class AktenzeichenErkenner:
 
         return None
 
+    # Namen die bei der Beteiligten-Erkennung ausgeschlossen werden sollen
+    # (Kanzlei-Mitarbeiter, Kanzleiname, etc.)
+    AUSGESCHLOSSENE_BETEILIGTE = {
+        # Kanzleiname und Varianten
+        'radtke, heigener und meier',
+        'radtke heigener und meier',
+        'radtke heigener meier',
+        'rhm',
+        'rhm kanzlei',
+        'rhm-kanzlei',
+
+        # Kanzlei-Mitarbeiter Nachnamen (einzeln)
+        'meier',           # Sven-Bryde Meier
+        'meyer',           # Tamara Meyer
+        'marquardsen',     # Ann-Kathrin Marquardsen
+        'ostertun',        # Christian Ostertun
+        'osterthun',       # Schreibvariante
+        'vollbrecht',      # Christian Vollbrecht (Alternative)
+        'fürsen',          # Dr. Ernst Joachim Fürsen
+        'fuersen',
+        'fuersten',
+        'goeser',
+        'göser',
+        'herberg',
+        'rückborn',
+        'rueckborn',
+        'akkoc',
+        'tönjes',
+        'toenjes',
+        'litzenroth',
+        'hingst',
+        'kaya',
+        'stöcken',
+        'stoecken',
+
+        # Kanzlei-Mitarbeiter Vornamen (einzeln - zu unspezifisch)
+        'sven',
+        'tamara',
+        'christian',
+        'ann-kathrin',
+        'ernst',
+        'joachim',
+        'korinna',
+
+        # Volle Namen der Kanzlei-Mitarbeiter
+        'sven-bryde meier',
+        'sven bryde meier',
+        'tamara meyer',
+        'ann-kathrin marquardsen',
+        'christian ostertun',
+        'christian vollbrecht',
+        'ernst joachim fürsen',
+        'dr. fürsen',
+        'dr fürsen',
+        'korinna rückborn',
+
+        # Typische Anrede-/Grußformel-Wörter
+        'kollege',
+        'kollegin',
+        'rechtsanwalt',
+        'rechtsanwältin',
+        'notar',
+    }
+
+    def _ist_ausgeschlossener_beteiligter(self, name: str) -> bool:
+        """
+        Prüft ob ein Name ausgeschlossen werden soll (Kanzlei-Mitarbeiter, Kanzleiname).
+
+        Args:
+            name: Zu prüfender Name
+
+        Returns:
+            True wenn der Name ausgeschlossen werden soll
+        """
+        name_lower = name.lower().strip()
+
+        # Exakter Match
+        if name_lower in self.AUSGESCHLOSSENE_BETEILIGTE:
+            return True
+
+        # Prüfe ob ein ausgeschlossener Name im Namen enthalten ist
+        # (z.B. "Rechtsanwalt Meier" enthält "meier")
+        for ausgeschlossen in self.AUSGESCHLOSSENE_BETEILIGTE:
+            # Nur prüfen wenn ausgeschlossener Name >= 4 Zeichen
+            # (um zu kurze Matches wie "rhm" in anderen Wörtern zu vermeiden)
+            if len(ausgeschlossen) >= 4:
+                # Prüfe als ganzes Wort
+                if re.search(rf'\b{re.escape(ausgeschlossen)}\b', name_lower):
+                    return True
+
+        return False
+
     def _erkenne_beteiligte_im_text(self, text: str) -> List[str]:
         """
         Extrahiert mögliche Beteiligte (Personen, Firmen) aus dem Text.
@@ -1391,6 +1483,9 @@ class AktenzeichenErkenner:
         - Namen in typischen Kontexten (Absender, Empfänger, Betreff)
         - Firmennamen (GmbH, AG, e.V., etc.)
         - Personen mit Titeln (Dr., Prof., etc.)
+
+        WICHTIG: Schließt Kanzlei-Mitarbeiter und den Kanzleinamen aus,
+        um falsche AZ-Treffer zu vermeiden.
 
         Returns:
             Liste von erkannten Beteiligten
@@ -1407,7 +1502,7 @@ class AktenzeichenErkenner:
             matches = re.findall(pattern, text, re.MULTILINE)
             for match in matches:
                 firma = match.strip()
-                if len(firma) >= 5:  # Mindestlänge
+                if len(firma) >= 5 and not self._ist_ausgeschlossener_beteiligter(firma):
                     beteiligte.append(firma)
 
         # 2. Personen mit Titeln
@@ -1420,7 +1515,7 @@ class AktenzeichenErkenner:
             matches = re.findall(pattern, text, re.MULTILINE)
             for match in matches:
                 person = match.strip()
-                if len(person) >= 3:
+                if len(person) >= 3 and not self._ist_ausgeschlossener_beteiligter(person):
                     beteiligte.append(person)
 
         # 3. Namen aus typischen Kontexten
@@ -1437,7 +1532,7 @@ class AktenzeichenErkenner:
                 name = match.strip()
                 # Bereinige (entferne Satzzeichen am Ende)
                 name = re.sub(r'[,;:.!?]+$', '', name).strip()
-                if len(name) >= 3 and len(name) <= 50:
+                if len(name) >= 3 and len(name) <= 50 and not self._ist_ausgeschlossener_beteiligter(name):
                     beteiligte.append(name)
 
         # Deduplizierung und Normalisierung
@@ -1447,8 +1542,10 @@ class AktenzeichenErkenner:
         for b in beteiligte:
             b_norm = b.lower().strip()
             if b_norm not in seen and len(b_norm) >= 3:
-                seen.add(b_norm)
-                beteiligte_unique.append(b)
+                # Nochmalige Prüfung auf ausgeschlossene Namen
+                if not self._ist_ausgeschlossener_beteiligter(b):
+                    seen.add(b_norm)
+                    beteiligte_unique.append(b)
 
         return beteiligte_unique
 
