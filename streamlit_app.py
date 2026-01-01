@@ -1322,9 +1322,11 @@ if st.session_state.batch_mode_active and st.session_state.batch_count > 0:
             f"{len(st.session_state.accumulated_documents)} Dokumente gesammelt")
 
     # Zeige akkumulierte Statistiken
-    col_stats = st.columns(6)
-    for idx, (sb, count) in enumerate(st.session_state.sachbearbeiter_stats_accumulated.items()):
-        if count > 0:
+    stats_with_count = [(sb, count) for sb, count in st.session_state.sachbearbeiter_stats_accumulated.items() if count > 0]
+    if stats_with_count:
+        num_cols = min(len(stats_with_count), 6)  # Max 6 Spalten
+        col_stats = st.columns(num_cols)
+        for idx, (sb, count) in enumerate(stats_with_count[:6]):  # Max 6 anzeigen
             with col_stats[idx]:
                 st.metric(sb, count, delta=None)
 
