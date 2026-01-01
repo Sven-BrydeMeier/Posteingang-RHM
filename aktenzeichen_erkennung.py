@@ -1289,9 +1289,9 @@ class AktenzeichenErkenner:
                            stichworte: List[str], aktenkurzbezeichnung: Optional[str] = None) -> str:
         """
         Generiert Dateinamen nach Schema:
-        [Aktenzeichen]_[Aktenkurzbezeichnung]_[Mandant]_[Gegner]_[Datum]_[Stichworte].pdf
+        [Aktenzeichen]_[3-Wort-Inhaltsbeschreibung]_[Absender/Gegner]_[Datum].pdf
 
-        Aktenkurzbezeichnung wird nur eingefügt, falls im Register vorhanden.
+        Die 3-Wort-Inhaltsbeschreibung wird aus den Stichworte generiert.
         """
         teile = []
 
@@ -1301,29 +1301,65 @@ class AktenzeichenErkenner:
         else:
             teile.append("ohne-az")
 
-        # 2. Aktenkurzbezeichnung (falls vorhanden)
-        if aktenkurzbezeichnung:
-            teile.append(self._bereinige_text(aktenkurzbezeichnung)[:30])
+        # 2. 3-Wort-Inhaltsbeschreibung (aus Stichworte)
+        inhaltsbeschreibung = self._generiere_3_wort_inhalt(stichworte, aktenkurzbezeichnung)
+        teile.append(inhaltsbeschreibung)
 
-        # 3. Mandant
-        if mandant:
-            teile.append(self._bereinige_text(mandant)[:30])
-
-        # 4. Gegner
+        # 3. Absender/Gegner (wer hat geschrieben)
         if gegner:
-            teile.append(self._bereinige_text(gegner)[:30])
+            teile.append(self._bereinige_text(gegner)[:25])
+        elif mandant:
+            teile.append(self._bereinige_text(mandant)[:25])
 
-        # 5. Datum
+        # 4. Datum
         if datum:
             teile.append(self._bereinige_text(datum))
 
-        # 6. Stichworte (max 3)
-        if stichworte:
-            stichworte_str = "_".join([self._bereinige_text(s) for s in stichworte[:3]])
-            teile.append(stichworte_str[:40])
-
         dateiname = "_".join(teile) + ".pdf"
         return dateiname
+
+    def _generiere_3_wort_inhalt(self, stichworte: List[str], aktenkurzbezeichnung: Optional[str] = None) -> str:
+        """
+        Generiert eine 3-Wort-Inhaltsbeschreibung.
+
+        Priorisierung:
+        1. Stichworte aus AI-Analyse (max 3)
+        2. Fallback: Wörter aus Aktenkurzbezeichnung
+        3. Fallback: "Dokument"
+        """
+        worte = []
+
+        # Stichworte verwenden (bereinigt)
+        if stichworte:
+            for s in stichworte[:3]:
+                wort = self._bereinige_text(s)
+                if wort and len(wort) >= 2:
+                    worte.append(wort[:15])  # Max 15 Zeichen pro Wort
+                if len(worte) >= 3:
+                    break
+
+        # Falls weniger als 3 Worte, aus Kurzbezeichnung ergänzen
+        if len(worte) < 3 and aktenkurzbezeichnung:
+            # Extrahiere Wörter aus Kurzbezeichnung
+            kurz_worte = re.findall(r'[A-Za-zÄÖÜäöüß]{3,}', aktenkurzbezeichnung)
+            for kw in kurz_worte:
+                if len(worte) >= 3:
+                    break
+                kw_bereinigt = self._bereinige_text(kw)
+                if kw_bereinigt and kw_bereinigt.lower() not in [w.lower() for w in worte]:
+                    worte.append(kw_bereinigt[:15])
+
+        # Fallback wenn immer noch leer
+        if not worte:
+            worte = ["Dokument"]
+
+        # Genau 3 Worte (mit Padding falls nötig)
+        while len(worte) < 3:
+            worte.append("")
+
+        # Zusammenfügen (leere Worte ignorieren)
+        inhalt = "-".join([w for w in worte[:3] if w])
+        return inhalt if inhalt else "Dokument"
 
     def _bereinige_text(self, text: str) -> str:
         """
