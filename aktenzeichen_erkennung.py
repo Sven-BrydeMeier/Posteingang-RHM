@@ -1528,6 +1528,27 @@ class AktenzeichenErkenner:
         """
         beteiligte = []
 
+        # ZUERST: Bereinige Text von Kanzlei-Adressen um falsche Matches zu vermeiden
+        # Entferne typische Kanzlei-Adresszeilen bevor Beteiligte extrahiert werden
+        kanzlei_patterns = [
+            r'Radtke,?\s*Heigener\s+und\s+Meier[^\n]*',
+            r'Radtke,?\s*Heigener\s*&\s*Meier[^\n]*',
+            r'RHM[- ]?Kanzlei[^\n]*',
+            r'(?:Rechtsanwalt|Rechtsanwältin|RA|RAin|Notar|Notarin)\s+(?:und\s+)?(?:Notar\s+)?(?:Sven[- ]?Bryde\s+)?Meier[^\n]*',
+            r'(?:Rechtsanwalt|Rechtsanwältin|RA|RAin)\s+(?:Tamara\s+)?Meyer[^\n]*',
+            r'(?:Rechtsanwalt|Rechtsanwältin|RA|RAin)\s+(?:Ann[- ]?Kathrin\s+)?Marquardsen[^\n]*',
+            r'(?:Rechtsanwalt|Rechtsanwältin|RA|RAin)\s+(?:Christian\s+)?(?:Ostertun|Vollbrecht)[^\n]*',
+            r'Sehr\s+geehrte[r]?\s+(?:Herr|Frau)\s+(?:Kollege?|Kollegin)?[^\n]*(?:Meier|Meyer|Marquardsen)[^\n]*',
+            r'Mit\s+(?:freundlichen|kollegialen)\s+Grüßen[^\n]*',
+            r'Hochachtungsvoll[^\n]*',
+        ]
+        text_bereinigt = text
+        for pat in kanzlei_patterns:
+            text_bereinigt = re.sub(pat, '', text_bereinigt, flags=re.IGNORECASE)
+
+        # Verwende bereinigten Text für die weitere Verarbeitung
+        text = text_bereinigt
+
         # 1. Firmennamen erkennen (mit Rechtsform)
         firmen_patterns = [
             r'([A-ZÄÖÜ][a-zäöüß\s&-]+(?:GmbH|AG|e\.V\.|KG|OHG|PartG|mbH|UG))',
