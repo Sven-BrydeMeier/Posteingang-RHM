@@ -180,8 +180,23 @@ class AktenzeichenErkenner:
         self.akten_register = self._lade_aktenregister(excel_path)
         self.storage = storage
 
+        # Erstelle Set von normalisierten Aktenzeichen für schnelles Lookup
+        self.akte_norm_set = self._erstelle_akte_norm_set()
+
         # Lade benutzerdefinierte Kürzel und erweitere die Kürzel-Listen
         self._load_custom_kuerzel()
+
+    def _erstelle_akte_norm_set(self) -> set:
+        """Erstellt ein Set von normalisierten Aktenzeichen für schnelles Lookup."""
+        if 'Akte' not in self.akten_register.columns:
+            return set()
+
+        def _norm(s):
+            if s is None or pd.isna(s):
+                return ""
+            return re.sub(r"\s+", "", str(s).replace("\xa0", "")).strip()
+
+        return set(self.akten_register['Akte'].apply(_norm).dropna())
 
     def _lade_aktenregister(self, excel_path: Path) -> pd.DataFrame:
         """Lädt aktenregister.xlsx, Blatt 'akten' mit automatischer Header-Erkennung"""
@@ -564,7 +579,14 @@ class AktenzeichenErkenner:
 
     def erkenne_aktenzeichen(self, text: str) -> Dict:
         """
-        Hauptfunktion: Erkennt internes und externe Aktenzeichen im Text
+        Hauptfunktion: Erkennt internes Aktenzeichen im Text.
+
+        ROBUSTE METHODE (OCR-tolerant):
+        1) 'Ihr Zeichen' (OCR-Varianten: thrZeichen, lhrZeichen)
+        2) 'Gz.:' (Geschäftszeichen)
+        3) Fallback: Muster d{1,4}/d{2} NUR wenn im Register vorhanden
+
+        KEINE Erkennung über Kurzbezeichnungen oder Beteiligte!
 
         Returns:
             Dict mit:
@@ -572,82 +594,130 @@ class AktenzeichenErkenner:
             - stamm: Nur der Stamm (z.B. "151/25")
             - kuerzel: Sachbearbeiter-Kürzel (z.B. "M")
             - externe_az: Liste externer Aktenzeichen
-            - quelle: Woher das interne AZ stammt (zeichen_feld, vollmuster, register, etc.)
+            - quelle: Woher das interne AZ stammt
+            - confidence: Konfidenz der Erkennung (0.0 - 1.0)
         """
         result = {
             'internes_az': None,
             'stamm': None,
             'kuerzel': None,
             'externe_az': [],
-            'quelle': None
+            'quelle': None,
+            'confidence': 0.0
         }
 
-        # Priorität 1: "Ihr Zeichen / Unser Zeichen" etc. (erweitert auf gesamten Text)
-        zeichen_az = self._suche_in_zeichen_feldern(text)
-        if zeichen_az:
-            result.update(zeichen_az)
-            result['quelle'] = 'zeichen_feld'
+        if not text:
             return result
 
-        # Priorität 2: Vollmuster im gesamten Text (ohne Keyword-Kontext)
-        vollmuster = self._suche_vollmuster(text)
-        if vollmuster:
-            result.update(vollmuster)
-            result['quelle'] = 'vollmuster'
-            return result
+        # Normalisiere Text (entferne Whitespace für OCR-Toleranz)
+        t_no_ws = re.sub(r"\s+", "", text.replace("\xa0", " "))
 
-        # Priorität 3: Stämme im gesamten Text mit Registertreffer
-        register_az = self._suche_stamm_mit_register(text)
-        if register_az:
-            result.update(register_az)
-            result['quelle'] = 'register'
-            return result
-
-        # Priorität 4: Aktenkurzbezeichnung im Text → Aktenzeichen aus Register
-        # (Bidirektionale Verknüpfung)
-        kurzbez_az = self._suche_nach_kurzbezeichnung_im_text(text)
-        if kurzbez_az:
-            result.update(kurzbez_az)
-            result['quelle'] = 'kurzbezeichnung_im_text'
-            return result
-
-        # Priorität 5: Parteibezeichnungen im Text → Aktenzeichen aus Register
-        # (z.B. "Sache Stadtwerke / Müller" findet "Stadtwerke Müller" im Register)
-        parteien_az = self._suche_nach_parteien_im_text(text)
-        if parteien_az:
-            result.update(parteien_az)
-            # quelle wird bereits in der Funktion gesetzt (parteien_im_text oder parteien_fuzzy_match)
-            return result
-
-        # Priorität 6: Globale Suche nach häufigsten Aktenzeichen-Mustern
-        # (für Fälle wo OCR-Reihenfolge stark abweicht)
-        global_az = self._suche_globale_muster(text)
-        if global_az:
-            result.update(global_az)
-            result['quelle'] = 'global_pattern'
-            return result
-
-        # Priorität 7: Beteiligten-basierter Abgleich (Fallback wenn kein AZ erkannt)
-        # Extrahiere Beteiligte aus dem Text
-        beteiligte = self._erkenne_beteiligte_im_text(text)
-        if beteiligte:
-            # Finde passende Akten im Register
-            treffer = self._finde_akten_nach_beteiligten(beteiligte)
-
-            if len(treffer) == 1:
-                # EINDEUTIGE Zuordnung → Verwende AZ automatisch
-                result.update(treffer[0])
-                result['quelle'] = 'beteiligte_eindeutig'
-                result.pop('score', None)  # Entferne Score aus Ergebnis
+        # 1) Ihr Zeichen (OCR-Varianten: Ihr / thr / lhr => *hrZeichen)
+        m = re.search(r"[A-Za-z]?hrZeichen[^0-9]{0,60}([0-9]{1,4}/[0-9]{2})", t_no_ws, flags=re.IGNORECASE)
+        if m:
+            stamm = self._norm_akte(m.group(1))
+            if stamm in self.akte_norm_set:
+                result.update(self._lookup_register(stamm))
+                result['quelle'] = 'context:hrZeichen'
+                result['confidence'] = 0.95
                 return result
-            elif len(treffer) > 1:
-                # MEHRERE Treffer → Gib Vorschläge zurück
-                result['az_vorschlaege'] = treffer  # Liste von Vorschlägen mit Score
-                result['quelle'] = 'beteiligte_mehrfach'
-                # Kein internes_az gesetzt, da nicht eindeutig
+            else:
+                result['stamm'] = stamm
+                result['internes_az'] = stamm
+                result['quelle'] = 'context:hrZeichen_not_in_register'
+                result['confidence'] = 0.70
+                return result
+
+        # 2) Gz.: (Geschäftszeichen der Kanzlei im Urteil/Schriftsatz)
+        m = re.search(r"Gz\.?:[^0-9]{0,20}([0-9]{1,4}/[0-9]{2})", t_no_ws, flags=re.IGNORECASE)
+        if m:
+            stamm = self._norm_akte(m.group(1))
+            if stamm in self.akte_norm_set:
+                result.update(self._lookup_register(stamm))
+                result['quelle'] = 'context:Gz'
+                result['confidence'] = 0.95
+                return result
+            else:
+                result['stamm'] = stamm
+                result['internes_az'] = stamm
+                result['quelle'] = 'context:Gz_not_in_register'
+                result['confidence'] = 0.70
+                return result
+
+        # 3) Fallback: Alle Muster wie 1547/21 finden
+        candidates = re.findall(r"(?<!\d)(\d{1,4}/\d{2})", t_no_ws)
+        candidates_norm = [self._norm_akte(c) for c in candidates]
+        candidates_in = [c for c in candidates_norm if c in self.akte_norm_set]
+
+        if len(set(candidates_in)) == 1:
+            # Eindeutiger Treffer im Register
+            stamm = candidates_in[0]
+            result.update(self._lookup_register(stamm))
+            result['quelle'] = 'fallback:unique_in_register'
+            result['confidence'] = 0.80
+            return result
+
+        if len(candidates_in) > 1:
+            # Mehrere Treffer - nimm das erste im Text vorkommende
+            earliest = min(set(candidates_in), key=lambda c: t_no_ws.find(c))
+            result.update(self._lookup_register(earliest))
+            result['quelle'] = f'fallback:multiple_in_register({sorted(set(candidates_in))[:5]})'
+            result['confidence'] = 0.60
+            return result
+
+        if candidates_norm:
+            # Muster gefunden aber nicht im Register
+            stamm = candidates_norm[0]
+            result['stamm'] = stamm
+            result['internes_az'] = stamm
+            result['quelle'] = 'fallback:pattern_not_in_register'
+            result['confidence'] = 0.40
+            return result
 
         # Externe Aktenzeichen sammeln (immer)
         result['externe_az'] = self._suche_externe_aktenzeichen(text)
+        result['quelle'] = 'no_match'
+
+        return result
+
+    def _norm_akte(self, s: str) -> str:
+        """Normalisiert Aktenzeichen (entfernt Whitespace)."""
+        if s is None:
+            return ""
+        return re.sub(r"\s+", "", str(s).replace("\xa0", "")).strip()
+
+    def _lookup_register(self, stamm: str) -> Dict:
+        """Sucht Stamm im Register und gibt erweiterte Infos zurück."""
+        result = {
+            'stamm': stamm,
+            'internes_az': stamm,
+            'kuerzel': None,
+            'aktenkurzbezeichnung': None
+        }
+
+        if 'Akte' not in self.akten_register.columns:
+            return result
+
+        treffer = self.akten_register[self.akten_register['Akte'].apply(self._norm_akte) == stamm]
+
+        if not treffer.empty:
+            row = treffer.iloc[0]
+
+            # SB-Kürzel
+            if 'SB' in self.akten_register.columns:
+                sb = row.get('SB')
+                if pd.notna(sb) and str(sb).strip():
+                    kuerzel = str(sb).strip().upper()
+                    result['kuerzel'] = kuerzel
+                    result['internes_az'] = f"{stamm}{kuerzel}"
+
+            # Kurzbezeichnung
+            for spalte in ['Kurzbez.', 'Kurzbezeichnung', 'Aktenkurzbezeichnung', 'Bez', 'Bezeichnung', 'KurzBez']:
+                if spalte in self.akten_register.columns:
+                    wert = row.get(spalte)
+                    if pd.notna(wert) and str(wert).strip():
+                        result['aktenkurzbezeichnung'] = str(wert).strip()
+                        break
 
         return result
 
