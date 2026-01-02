@@ -25,6 +25,89 @@ import fitz  # PyMuPDF
 
 
 # ----------------------------
+# Ausgeschlossene Begriffe (Kanzlei-Namen, Mitarbeiter)
+# Diese dürfen NICHT für Akten-Matching verwendet werden
+# ----------------------------
+AUSGESCHLOSSENE_BEGRIFFE = {
+    # Kanzleiname und Varianten
+    'radtke, heigener und meier',
+    'radtke heigener und meier',
+    'radtke heigener meier',
+    'radtke, heigener & meier',
+    'rhm',
+    'rhm kanzlei',
+    'rhm-kanzlei',
+
+    # Kanzlei-Mitarbeiter Nachnamen (einzeln)
+    'meier',           # Sven-Bryde Meier
+    'meyer',           # Tamara Meyer
+    'marquardsen',     # Ann-Kathrin Marquardsen
+    'ostertun',        # Christian Ostertun
+    'osterthun',       # Schreibvariante
+    'vollbrecht',      # Christian Vollbrecht
+    'fürsen',          # Dr. Ernst Joachim Fürsen
+    'fuersen',
+    'fuersten',
+    'goeser',
+    'göser',
+    'herberg',
+    'rückborn',
+    'rueckborn',
+    'akkoc',
+    'tönjes',
+    'toenjes',
+    'litzenroth',
+    'hingst',
+    'kaya',
+    'stöcken',
+    'stoecken',
+    'radtke',
+    'heigener',
+
+    # Volle Namen der Kanzlei-Mitarbeiter
+    'sven-bryde meier',
+    'sven bryde meier',
+    'tamara meyer',
+    'ann-kathrin marquardsen',
+    'christian ostertun',
+    'christian vollbrecht',
+    'ernst joachim fürsen',
+    'dr. fürsen',
+    'dr fürsen',
+    'korinna rückborn',
+
+    # Typische Anrede-/Grußformel-Wörter
+    'kollege',
+    'kollegin',
+    'rechtsanwalt',
+    'rechtsanwältin',
+    'notar',
+}
+
+
+def _ist_ausgeschlossener_begriff(text: str) -> bool:
+    """
+    Prüft ob ein Text einen ausgeschlossenen Begriff enthält.
+    Wird verwendet um falsche Akten-Matches zu vermeiden.
+    """
+    if not text:
+        return False
+    text_lower = text.lower().strip()
+
+    # Exakter Match
+    if text_lower in AUSGESCHLOSSENE_BEGRIFFE:
+        return True
+
+    # Prüfe ob ein ausgeschlossener Begriff im Text enthalten ist
+    for begriff in AUSGESCHLOSSENE_BEGRIFFE:
+        if len(begriff) >= 4:  # Nur längere Begriffe für Teilmatch
+            if re.search(rf'\b{re.escape(begriff)}\b', text_lower):
+                return True
+
+    return False
+
+
+# ----------------------------
 # Helpers: Normalisierung
 # ----------------------------
 def _norm_col(s: str) -> str:
@@ -204,6 +287,24 @@ def extract_sender(text: str) -> str:
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     head = lines[:12]
 
+    # Kanzlei-Zeilen ausschließen (eigene Adresse, Anrede etc.)
+    kanzlei_indicators = [
+        'radtke',
+        'heigener',
+        'rhm',
+        'sehr geehrte',
+        'mit freundlichen',
+        'mit kollegialen',
+        'hochachtungsvoll',
+    ]
+
+    def ist_kanzlei_zeile(line: str) -> bool:
+        line_l = line.lower()
+        return any(ind in line_l for ind in kanzlei_indicators)
+
+    # Filtere Kanzlei-Zeilen aus
+    head_filtered = [ln for ln in head if not ist_kanzlei_zeile(ln)]
+
     court_keywords = [
         "Bundesgerichtshof",
         "Oberlandesgericht",
@@ -221,13 +322,13 @@ def extract_sender(text: str) -> str:
         "Agentur für Arbeit",
     ]
 
-    for ln in head:
+    for ln in head_filtered:
         for kw in court_keywords:
             if kw.lower() in ln.lower():
                 return " ".join(ln.split()[:4])
 
-    if head:
-        return " ".join(head[0].split()[:4])
+    if head_filtered:
+        return " ".join(head_filtered[0].split()[:4])
 
     return "Unbekannt"
 
@@ -281,14 +382,41 @@ def match_register_row(df_reg: pd.DataFrame, az: Optional[str], sb: Optional[str
         if len(m) >= 1:
             return m.iloc[0]
 
-    # fallback: Kurzbez im Text finden (schwach, aber ok)
-    text_l = text.lower()
+    # Bereinige Text von Kanzlei-Adressen für Kurzbez-Matching
+    # Entferne typische Kanzlei-Adresszeilen um falsche Matches zu vermeiden
+    text_bereinigt = text
+    kanzlei_patterns = [
+        r'Radtke,?\s*Heigener\s+und\s+Meier[^\n]*',
+        r'Radtke,?\s*Heigener\s*&\s*Meier[^\n]*',
+        r'RHM[- ]?Kanzlei[^\n]*',
+        r'(?:Rechtsanwalt|RA|Notar)[^\n]*(?:Meier|Meyer|Marquardsen|Ostertun|Vollbrecht)[^\n]*',
+        r'Sehr\s+geehrte[r]?\s+(?:Herr|Frau)\s+(?:Kollege?|Kollegin)?[^\n]*(?:Meier|Meyer)[^\n]*',
+        r'Mit\s+(?:freundlichen|kollegialen)\s+Grüßen[^\n]*',
+    ]
+    for pat in kanzlei_patterns:
+        text_bereinigt = re.sub(pat, '', text_bereinigt, flags=re.IGNORECASE)
+
+    # fallback: Kurzbez im Text finden (schwach, aber mit Ausschluss-Prüfung)
+    text_l = text_bereinigt.lower()
     df2 = df_reg.copy()
     df2["kb_len"] = df2["Kurzbez"].fillna("").astype(str).str.len()
     df2 = df2.sort_values("kb_len", ascending=False)
     for _, row in df2.head(50).iterrows():
         kb = str(row["Kurzbez"]).strip()
-        if kb and kb.lower() in text_l:
+        if not kb:
+            continue
+
+        # WICHTIG: Überspringe Kurzbez, die ausgeschlossene Begriffe sind
+        # (z.B. wenn Kurzbez "Meier" ist und "Meier" in der Kanzlei-Adresse steht)
+        if _ist_ausgeschlossener_begriff(kb):
+            continue
+
+        # Prüfe auch einzelne Wörter der Kurzbezeichnung
+        kb_words = kb.lower().split()
+        if any(word in AUSGESCHLOSSENE_BEGRIFFE for word in kb_words if len(word) >= 4):
+            continue
+
+        if kb.lower() in text_l:
             return row
 
     return None
