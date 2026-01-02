@@ -1,22 +1,21 @@
 # posteingang_trenner.py
 # Upload: aktenregister.xlsx + Posteingang.pdf
-# Output: getrennte PDFs (an "TRENNSEITE") + Dateinamen nach:
-#   Akte-SB-Kurzbez__<2-Wort-Kurzbez aus Inhalt>__<Absender>__<Datum>.pdf
+# Output: getrennte PDFs (an "TRENNSEITE") + Dateinamen
 #
-# Aktenzeichen-Format Kanzlei: 739/25SQ08TÖ
-#   AZ=739/25, SB=SQ, Bereich=08 (optional), ReNo=TÖ (optional)
+# Aktenzeichen-Erkennung:
+#   1) "Ihr Zeichen" (OCR-Varianten: thrZeichen, lhrZeichen)
+#   2) "Gz.:" (Geschäftszeichen)
+#   3) Fallback: Muster d{1,4}/d{2} die im Register existieren
 #
 # Dependencies:
 #   pip install streamlit pandas pymupdf openpyxl
-# Optional OCR fallback (falls gescannt):
-#   pip install pytesseract pillow  (und tesseract-ocr OS-Paket)
 
 import io
 import re
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -25,103 +24,23 @@ import fitz  # PyMuPDF
 
 
 # ----------------------------
-# Ausgeschlossene Begriffe (Kanzlei-Namen, Mitarbeiter)
-# Diese dürfen NICHT für Akten-Matching verwendet werden
-# ----------------------------
-AUSGESCHLOSSENE_BEGRIFFE = {
-    # Kanzleiname und Varianten
-    'radtke, heigener und meier',
-    'radtke heigener und meier',
-    'radtke heigener meier',
-    'radtke, heigener & meier',
-    'rhm',
-    'rhm kanzlei',
-    'rhm-kanzlei',
-
-    # Kanzlei-Mitarbeiter Nachnamen (einzeln)
-    'meier',           # Sven-Bryde Meier
-    'meyer',           # Tamara Meyer
-    'marquardsen',     # Ann-Kathrin Marquardsen
-    'ostertun',        # Christian Ostertun
-    'osterthun',       # Schreibvariante
-    'vollbrecht',      # Christian Vollbrecht
-    'fürsen',          # Dr. Ernst Joachim Fürsen
-    'fuersen',
-    'fuersten',
-    'goeser',
-    'göser',
-    'herberg',
-    'rückborn',
-    'rueckborn',
-    'akkoc',
-    'tönjes',
-    'toenjes',
-    'litzenroth',
-    'hingst',
-    'kaya',
-    'stöcken',
-    'stoecken',
-    'radtke',
-    'heigener',
-
-    # Volle Namen der Kanzlei-Mitarbeiter
-    'sven-bryde meier',
-    'sven bryde meier',
-    'tamara meyer',
-    'ann-kathrin marquardsen',
-    'christian ostertun',
-    'christian vollbrecht',
-    'ernst joachim fürsen',
-    'dr. fürsen',
-    'dr fürsen',
-    'korinna rückborn',
-
-    # Typische Anrede-/Grußformel-Wörter
-    'kollege',
-    'kollegin',
-    'rechtsanwalt',
-    'rechtsanwältin',
-    'notar',
-}
-
-
-def _ist_ausgeschlossener_begriff(text: str) -> bool:
-    """
-    Prüft ob ein Text einen ausgeschlossenen Begriff enthält.
-    Wird verwendet um falsche Akten-Matches zu vermeiden.
-    """
-    if not text:
-        return False
-    text_lower = text.lower().strip()
-
-    # Exakter Match
-    if text_lower in AUSGESCHLOSSENE_BEGRIFFE:
-        return True
-
-    # Prüfe ob ein ausgeschlossener Begriff im Text enthalten ist
-    for begriff in AUSGESCHLOSSENE_BEGRIFFE:
-        if len(begriff) >= 4:  # Nur längere Begriffe für Teilmatch
-            if re.search(rf'\b{re.escape(begriff)}\b', text_lower):
-                return True
-
-    return False
-
-
-# ----------------------------
 # Helpers: Normalisierung
 # ----------------------------
-def _norm_col(s: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", str(s).lower())
+def _norm(s: str) -> str:
+    """Normalize strings (remove whitespace + non-breaking spaces)."""
+    if s is None:
+        return ""
+    return re.sub(r"\s+", "", str(s).replace("\xa0", "")).strip()
 
 
-def _safe_filename(s: str, max_len: int = 160) -> str:
+def _safe_filename(s: str, max_len: int = 140) -> str:
+    """Create safe filename for Windows/Linux."""
     s = str(s).strip().replace("\n", " ")
-    # Windows-unfreundliche Zeichen
-    s = re.sub(r'[<>:"/\\|?*\x00-\x1F]+', "_", s)
+    s = re.sub(r'[\\/:*?"<>|]+', "_", s)
     s = re.sub(r"\s+", " ", s).strip()
     if len(s) > max_len:
         s = s[:max_len].rstrip()
-    return s
+    return s or "unbenannt"
 
 
 def _date_to_iso(d: datetime) -> str:
@@ -142,42 +61,62 @@ def _parse_date(dstr: str) -> Optional[datetime]:
 # ----------------------------
 # Aktenregister laden
 # ----------------------------
-def load_aktenregister(xlsx_bytes: bytes) -> pd.DataFrame:
+def load_aktenregister(xlsx_bytes: bytes) -> Tuple[pd.DataFrame, Set[str]]:
+    """
+    Load Aktenregister Excel.
+    Returns DataFrame and set of normalized Akte numbers for quick lookup.
+    """
     df = pd.read_excel(io.BytesIO(xlsx_bytes), dtype=str)
     df.columns = [str(c) for c in df.columns]
 
-    # flexible Spaltenzuordnung
-    colmap = {_norm_col(c): c for c in df.columns}
-    required = {"akte": None, "sb": None, "kurzbez": None}
+    # Flexible Spaltenzuordnung
+    colmap = {re.sub(r"[^a-z0-9]+", "", str(c).lower()): c for c in df.columns}
 
-    for k in list(required.keys()):
-        if k in colmap:
-            required[k] = colmap[k]
-        else:
-            for nc, orig in colmap.items():
-                if k in nc:
-                    required[k] = orig
-                    break
+    # Finde Akte-Spalte
+    akte_col = None
+    for key in ["akte", "aktenzeichen", "az"]:
+        if key in colmap:
+            akte_col = colmap[key]
+            break
 
-    missing = [k for k, v in required.items() if v is None]
-    if missing:
-        raise ValueError(
-            f"Aktenregister: Spalten nicht gefunden: {missing}. "
-            f"Gefunden: {list(df.columns)}. Erwartet mindestens: Akte, SB, Kurzbez."
-        )
+    if not akte_col:
+        raise ValueError(f"Spalte 'Akte' nicht gefunden. Vorhanden: {list(df.columns)}")
 
-    df = df.rename(columns={required["akte"]: "Akte", required["sb"]: "SB", required["kurzbez"]: "Kurzbez"})
-    df["Akte"] = df["Akte"].astype(str).str.strip()
-    df["SB"] = df["SB"].astype(str).str.strip()
-    df["Kurzbez"] = df["Kurzbez"].astype(str).str.strip()
-    df = df.dropna(subset=["Akte"]).copy()
-    df = df[df["Akte"].str.len() > 0].copy()
+    # Finde SB-Spalte
+    sb_col = None
+    for key in ["sb", "sachbearbeiter"]:
+        if key in colmap:
+            sb_col = colmap[key]
+            break
 
-    # Normalisierte Hilfsspalten für Matching
-    df["Akte_norm"] = df["Akte"].str.lower()
-    df["SB_norm"] = df["SB"].str.upper()
+    # Finde Kurzbez-Spalte
+    kurzbez_col = None
+    for key in ["kurzbez", "kurzbezeichnung", "bezeichnung", "bez"]:
+        if key in colmap:
+            kurzbez_col = colmap[key]
+            break
 
-    return df
+    # Normalisiere
+    df["akte_norm"] = df[akte_col].apply(_norm)
+    df["Akte"] = df[akte_col]
+
+    if sb_col:
+        df["SB"] = df[sb_col].fillna("").astype(str).str.strip().str.upper()
+    else:
+        df["SB"] = ""
+
+    if kurzbez_col:
+        df["Kurzbez"] = df[kurzbez_col].fillna("").astype(str).str.strip()
+    else:
+        df["Kurzbez"] = ""
+
+    # Entferne leere Zeilen
+    df = df[df["akte_norm"].str.len() > 0].copy()
+
+    # Set für schnelles Lookup
+    reg_set = set(df["akte_norm"].dropna())
+
+    return df, reg_set
 
 
 # ----------------------------
@@ -189,7 +128,10 @@ def page_text(doc: fitz.Document, page_index: int) -> str:
 
 
 def is_trennseite(text: str) -> bool:
-    return bool(re.search(r"\btrennseite\b", text, flags=re.IGNORECASE))
+    if not text:
+        return False
+    t = re.sub(r"\s+", "", text).upper()
+    return t == "TRENNSEITE"
 
 
 def split_pdf_by_trennseite(pdf_bytes: bytes) -> Tuple[fitz.Document, List[List[int]]]:
@@ -221,28 +163,81 @@ def extract_chunk_text(doc: fitz.Document, pages: List[int], max_pages: int = 3)
 
 def write_chunk_pdf(doc: fitz.Document, pages: List[int]) -> bytes:
     out = fitz.open()
-    out.insert_pdf(doc, from_page=min(pages), to_page=max(pages), pages=pages)
+    for p in pages:
+        out.insert_pdf(doc, from_page=p, to_page=p)
     b = out.tobytes(deflate=True)
     out.close()
     return b
 
 
 # ----------------------------
-# Extraktion: Kanzlei-Aktenzeichen / Absender / Datum / Kurzbez (2 Wörter)
+# AKTENZEICHEN-ERKENNUNG (robust, OCR-tolerant)
 # ----------------------------
+def detect_akte(text: str, reg_set: Set[str]) -> Tuple[Optional[str], float, str]:
+    """
+    Detect internal Akte (e.g. '1547/21') from OCR-ish page text.
 
-# Kanzlei-Aktenzeichen: 739/25SQ08TÖ
-# Gruppe 1 = AZ (739/25), Gruppe 2 = SB (SQ), Gruppe 3 = Bereich (optional), Gruppe 4 = ReNo (optional)
-KANZLEI_AZ_RE = re.compile(
-    r"\b([0-9]{1,6}/[0-9]{2})\s*([A-ZÄÖÜ]{1,3})\s*([0-9]{2})?\s*([A-ZÄÖÜ]{1,3})?\b"
-)
+    Strategy:
+    1) Look for 'Ihr Zeichen' (OCR variants like 'thrZeichen') nearby
+    2) Look for 'Gz.:' (often appears in judgments)
+    3) Fallback: take all occurrences of d{1,4}/d{2} and pick one that exists in register
 
-# Wenn ein Label davor steht (Gz./Az./Aktenzeichen), matchen wir gern "kompakt"
-KANZLEI_AZ_COMPACT_RE = re.compile(
-    r"(?:\bGz\.?\b|\bAz\.?\b|\bAktenzeichen\b)\s*[:\-]?\s*([0-9]{1,6}/[0-9]{2}[A-ZÄÖÜ]{1,3}[0-9]{0,2}[A-ZÄÖÜ]{0,3})",
-    flags=re.IGNORECASE,
-)
+    Returns: (akte_norm, confidence, reason)
+    """
+    if not text:
+        return None, 0.0, "no_text"
 
+    # Remove whitespace to survive OCR that loses spacing
+    t_no_ws = re.sub(r"\s+", "", text.replace("\xa0", " "))
+
+    # 1) Ihr Zeichen (OCR variations: Ihr / thr / lhr => *hrZeichen)
+    m = re.search(r"[A-Za-z]?hrZeichen[^0-9]{0,60}([0-9]{1,4}/[0-9]{2})", t_no_ws, flags=re.IGNORECASE)
+    if m:
+        akte_norm = _norm(m.group(1))
+        if akte_norm in reg_set:
+            return akte_norm, 0.95, "context:hrZeichen"
+        return akte_norm, 0.70, "context:hrZeichen_not_in_register"
+
+    # 2) Gz.: (Geschäftszeichen der Kanzlei im Urteil/Schriftsatz)
+    m = re.search(r"Gz\.?:[^0-9]{0,20}([0-9]{1,4}/[0-9]{2})", t_no_ws, flags=re.IGNORECASE)
+    if m:
+        akte_norm = _norm(m.group(1))
+        if akte_norm in reg_set:
+            return akte_norm, 0.95, "context:Gz"
+        return akte_norm, 0.70, "context:Gz_not_in_register"
+
+    # 3) Fallback: all patterns like 1547/21
+    candidates = re.findall(r"(?<!\d)(\d{1,4}/\d{2})", t_no_ws)
+    candidates_norm = [_norm(c) for c in candidates]
+    candidates_in = [c for c in candidates_norm if c in reg_set]
+
+    if len(set(candidates_in)) == 1:
+        return candidates_in[0], 0.80, "fallback:unique_in_register"
+
+    if len(candidates_in) > 1:
+        # Nimm das erste im Text vorkommende
+        earliest = min(set(candidates_in), key=lambda c: t_no_ws.find(c))
+        return earliest, 0.60, f"fallback:multiple_in_register({sorted(set(candidates_in))[:5]})"
+
+    if candidates_norm:
+        return candidates_norm[0], 0.40, "fallback:pattern_not_in_register"
+
+    return None, 0.0, "no_match"
+
+
+def lookup_akte(df_reg: pd.DataFrame, akte_norm: str) -> Optional[Dict]:
+    """Lookup Akte in register, return row as dict or None."""
+    if not akte_norm:
+        return None
+    hit = df_reg[df_reg["akte_norm"] == akte_norm]
+    if hit.empty:
+        return None
+    return hit.iloc[0].to_dict()
+
+
+# ----------------------------
+# Datum / Absender Extraktion
+# ----------------------------
 DATE_RULES = [
     r"\bVerk[üu]ndet\s+am\s+(\d{1,2}\.\d{1,2}\.\d{4})\b",
     r"\bBeschlossen\s+am\s+(\d{1,2}\.\d{1,2}\.\d{4})\b",
@@ -251,23 +246,6 @@ DATE_RULES = [
     r"\bvom\s+(\d{1,2}\.\d{1,2}\.\d{4})\b",
 ]
 GENERIC_DATE = r"\b(\d{1,2}\.\d{1,2}\.\d{4})\b"
-
-
-def extract_az_sb(text: str) -> Tuple[Optional[str], Optional[str]]:
-    # 1) Mit Label (Gz/Az/Aktenzeichen)
-    m0 = KANZLEI_AZ_COMPACT_RE.search(text)
-    if m0:
-        raw = m0.group(1)
-        m = KANZLEI_AZ_RE.search(raw)
-        if m:
-            return m.group(1), m.group(2)
-
-    # 2) Fallback: irgendwo im Text
-    m = KANZLEI_AZ_RE.search(text)
-    if m:
-        return m.group(1), m.group(2)
-
-    return None, None
 
 
 def extract_date(text: str) -> Optional[datetime]:
@@ -287,39 +265,22 @@ def extract_sender(text: str) -> str:
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     head = lines[:12]
 
-    # Kanzlei-Zeilen ausschließen (eigene Adresse, Anrede etc.)
+    # Kanzlei-Zeilen ausschließen
     kanzlei_indicators = [
-        'radtke',
-        'heigener',
-        'rhm',
-        'sehr geehrte',
-        'mit freundlichen',
-        'mit kollegialen',
-        'hochachtungsvoll',
+        'radtke', 'heigener', 'rhm',
+        'sehr geehrte', 'mit freundlichen', 'mit kollegialen', 'hochachtungsvoll',
     ]
 
     def ist_kanzlei_zeile(line: str) -> bool:
         line_l = line.lower()
         return any(ind in line_l for ind in kanzlei_indicators)
 
-    # Filtere Kanzlei-Zeilen aus
     head_filtered = [ln for ln in head if not ist_kanzlei_zeile(ln)]
 
     court_keywords = [
-        "Bundesgerichtshof",
-        "Oberlandesgericht",
-        "Landgericht",
-        "Amtsgericht",
-        "Arbeitsgericht",
-        "Sozialgericht",
-        "Verwaltungsgericht",
-        "Finanzgericht",
-        "Staatsanwaltschaft",
-        "Kreis",
-        "Stadt",
-        "Gemeinde",
-        "Jobcenter",
-        "Agentur für Arbeit",
+        "Bundesgerichtshof", "Oberlandesgericht", "Landgericht", "Amtsgericht",
+        "Arbeitsgericht", "Sozialgericht", "Verwaltungsgericht", "Finanzgericht",
+        "Staatsanwaltschaft", "Kreis", "Stadt", "Gemeinde", "Jobcenter", "Agentur für Arbeit",
     ]
 
     for ln in head_filtered:
@@ -372,32 +333,9 @@ def two_word_kurzbez_from_content(text: str) -> str:
     return " ".join(hits[:2])
 
 
-def match_register_row(df_reg: pd.DataFrame, az: Optional[str], sb: Optional[str], text: str) -> Optional[pd.Series]:
-    """
-    Sucht eine passende Akte im Register NUR wenn ein Aktenzeichen erkannt wurde.
-
-    WICHTIG: Kein Fallback-Matching über Kurzbezeichnungen!
-    Das führte zu falschen Zuordnungen (z.B. "Meier" in Kanzlei-Adresse).
-
-    Wenn kein AZ erkannt wird → None zurückgeben → manuelle Zuordnung nötig.
-    """
-    if not az:
-        # Kein AZ erkannt → keine Vermutung, manuelle Zuordnung erforderlich
-        return None
-
-    # AZ erkannt → im Register suchen
-    m = df_reg[df_reg["Akte_norm"] == az.strip().lower()]
-    if sb:
-        m2 = m[m["SB_norm"] == sb.strip().upper()]
-        if len(m2) >= 1:
-            return m2.iloc[0]
-    if len(m) >= 1:
-        return m.iloc[0]
-
-    # AZ nicht im Register gefunden
-    return None
-
-
+# ----------------------------
+# Dokument-Vorschläge erstellen
+# ----------------------------
 @dataclass
 class Proposed:
     idx: int
@@ -409,34 +347,46 @@ class Proposed:
     date_iso: str
     filename: str
     pages: str
+    confidence: float
+    reason: str
 
 
-def build_proposals(doc: fitz.Document, chunks: List[List[int]], df_reg: pd.DataFrame) -> Tuple[List[Proposed], List[bytes]]:
+def build_proposals(doc: fitz.Document, chunks: List[List[int]], df_reg: pd.DataFrame, reg_set: Set[str]) -> Tuple[List[Proposed], List[bytes]]:
     proposals: List[Proposed] = []
     chunk_pdfs: List[bytes] = []
 
     for i, pages in enumerate(chunks, start=1):
         t = extract_chunk_text(doc, pages, max_pages=3)
 
-        az, sb_found = extract_az_sb(t)
+        # AKTENZEICHEN-ERKENNUNG (neue robuste Methode)
+        akte_norm, confidence, reason = detect_akte(t, reg_set)
+
         dt = extract_date(t)
         sender = extract_sender(t)
         kurz2 = two_word_kurzbez_from_content(t)
 
-        row = match_register_row(df_reg, az, sb_found, t)
+        # Lookup im Register
+        info = lookup_akte(df_reg, akte_norm) if akte_norm else None
 
-        if row is not None:
-            akte_out = str(row["Akte"]).strip()
-            sb_out = str(row["SB"]).strip()
-            kb_out = str(row["Kurzbez"]).strip()
+        if info:
+            akte_out = str(info.get("Akte", akte_norm)).strip()
+            sb_out = str(info.get("SB", "")).strip()
+            kb_out = str(info.get("Kurzbez", "")).strip()
         else:
-            akte_out = az.strip() if az else "Unbekannt"
-            sb_out = sb_found.strip() if sb_found else "Unbekannt"
-            kb_out = "Unbekannt"
+            akte_out = akte_norm if akte_norm else "Unbekannt"
+            sb_out = ""
+            kb_out = ""
 
         date_iso = _date_to_iso(dt) if dt else "Unbekanntes-Datum"
 
-        base = f"{akte_out}-{sb_out}-{kb_out}"
+        # Dateiname zusammenbauen
+        if kb_out:
+            base = f"{akte_out}-{sb_out}-{kb_out}" if sb_out else f"{akte_out}-{kb_out}"
+        elif sb_out:
+            base = f"{akte_out}-{sb_out}"
+        else:
+            base = akte_out
+
         fname = f"{base}__{kurz2}__{sender}__{date_iso}.pdf"
         fname = _safe_filename(fname)
 
@@ -453,6 +403,8 @@ def build_proposals(doc: fitz.Document, chunks: List[List[int]], df_reg: pd.Data
                 date_iso=date_iso,
                 filename=fname,
                 pages=f"{pages[0]+1}-{pages[-1]+1}",
+                confidence=confidence,
+                reason=reason,
             )
         )
         chunk_pdfs.append(pdf_bytes)
@@ -472,6 +424,8 @@ def proposals_to_df(props: List[Proposed]) -> pd.DataFrame:
                 "Kurzbez (Inhalt, 2W)": p.kurzbez_content_2w,
                 "Absender": p.sender,
                 "Datum (ISO)": p.date_iso,
+                "Confidence": f"{p.confidence:.0%}",
+                "Erkennung": p.reason,
                 "Dateiname": p.filename,
             }
             for p in props
@@ -503,17 +457,22 @@ with st.sidebar:
     pdf_file = st.file_uploader("Posteingang (.pdf)", type=["pdf"])
 
     st.markdown("---")
-    st.markdown("### Hinweise")
-    st.markdown("- Trennung erfolgt an Seiten mit **TRENNSEITE** (Trennseiten werden entfernt).")
-    st.markdown("- Dateinamen werden vorgeschlagen und können unten bearbeitet werden.")
-    st.markdown("- Keine Secrets/API-Keys in Code/Logs eintragen (nutze `st.secrets`).")
+    st.markdown("### Aktenzeichen-Erkennung")
+    st.markdown("""
+    **Strategie (Priorität):**
+    1. `Ihr Zeichen: 1547/21...` (OCR-tolerant)
+    2. `Gz.: 1547/21` (Geschäftszeichen)
+    3. Fallback: Muster `dddd/dd` im Register
+
+    **Keine** Erkennung über Kurzbezeichnungen!
+    """)
 
 if not reg_file or not pdf_file:
     st.info("Bitte Aktenregister.xlsx und Posteingang.pdf hochladen.")
     st.stop()
 
 try:
-    df_reg = load_aktenregister(reg_file.getvalue())
+    df_reg, reg_set = load_aktenregister(reg_file.getvalue())
 except Exception as e:
     st.error("Aktenregister konnte nicht geladen werden.")
     st.exception(e)
@@ -534,7 +493,7 @@ if not chunks:
 
 st.success(f"Gefunden: {len(chunks)} Dokument(e) nach Trennung an 'TRENNSEITE'.")
 
-props, chunk_pdfs = build_proposals(doc, chunks, df_reg)
+props, chunk_pdfs = build_proposals(doc, chunks, df_reg, reg_set)
 df_props = proposals_to_df(props)
 
 st.markdown("## Vorschläge (bearbeitbar)")
@@ -547,6 +506,8 @@ edited = st.data_editor(
     column_config={
         "Dok#": st.column_config.NumberColumn(disabled=True),
         "Seiten": st.column_config.TextColumn(disabled=True),
+        "Confidence": st.column_config.TextColumn(disabled=True),
+        "Erkennung": st.column_config.TextColumn(disabled=True),
     },
 )
 
@@ -560,7 +521,12 @@ df_final = edited.copy()
 if auto_rebuild:
     new_names = []
     for _, r in df_final.iterrows():
-        base = f"{r['Akte']}-{r['SB']}-{r['Kurzbez (Register)']}"
+        parts = [r['Akte']]
+        if r['SB']:
+            parts.append(r['SB'])
+        if r['Kurzbez (Register)']:
+            parts.append(r['Kurzbez (Register)'])
+        base = "-".join(parts)
         fname = f"{base}__{r['Kurzbez (Inhalt, 2W)']}__{r['Absender']}__{r['Datum (ISO)']}.pdf"
         new_names.append(_safe_filename(fname))
     df_final["Dateiname"] = new_names
