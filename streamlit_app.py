@@ -1289,15 +1289,16 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
 
     with col_emp1:
         st.subheader("📄 Posteingang hochladen")
-        empfang_pdf = st.file_uploader(
-            "PDF-Datei mit Tagespost (OCR)",
+        empfang_pdfs = st.file_uploader(
+            "PDF-Dateien mit Tagespost (OCR) - mehrere möglich",
             type=["pdf"],
+            accept_multiple_files=True,
             key="empfang_simple_pdf",
-            help="Laden Sie eine OCR-PDF-Datei hoch"
+            help="Laden Sie eine oder mehrere OCR-PDF-Dateien hoch"
         )
         # Speichere Upload-Metadaten
-        if empfang_pdf:
-            st.session_state.empfang_upload_name = empfang_pdf.name
+        if empfang_pdfs:
+            st.session_state.empfang_upload_name = empfang_pdfs[0].name if empfang_pdfs else ""
             st.session_state.empfang_upload_time = datetime.now()
 
     with col_emp2:
@@ -1315,11 +1316,18 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
         )
 
     # Verarbeitung
-    if empfang_pdf:
+    if empfang_pdfs:
         if st.button("🚀 Verarbeitung starten", type="primary", key="empfang_simple_start"):
             # Speichere Excel falls hochgeladen
             if empfang_excel:
-                storage.save_aktenregister_upload(empfang_excel.getvalue())
+                import pandas as pd
+                # Lese Excel und speichere im Storage
+                new_df = pd.read_excel(
+                    BytesIO(empfang_excel.read()),
+                    sheet_name='akten',
+                    header=1
+                )
+                storage.save_aktenregister(new_df, merge=storage.has_aktenregister())
 
             if not storage.has_aktenregister():
                 st.error("❌ Bitte zuerst Aktenregister hochladen!")
@@ -1333,53 +1341,59 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
                     from excel_generator import ExcelGenerator
                     from training_database import TrainingDatabase
 
-                    pdf_bytes = empfang_pdf.getvalue()
-
-                    # Speichere PDF temporär
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
-                        tmp.write(pdf_bytes)
-                        pdf_path = tmp.name
-
-                    excel_path = storage.aktenregister_file
-                    erkenner = AktenzeichenErkenner(excel_path, storage=storage)
-
-                    processor = PDFProcessor(pdf_path, debug=True, trennmodus="Text 'Trennseite'", excel_path=excel_path)
-                    dokumente, debug_info = processor.verarbeite_pdf()
-
-                    st.info(f"📄 {len(dokumente)} Dokumente erkannt")
-
-                    training_db = TrainingDatabase(storage.storage_dir)
-                    analyzer = DocumentAnalyzer(current_api_key, api_provider=api_provider, training_db=training_db)
-
                     alle_daten = []
                     sachbearbeiter_stats = {}
 
-                    progress = st.progress(0)
-                    for i, doc in enumerate(dokumente):
-                        progress.progress((i + 1) / len(dokumente))
+                    # Verarbeite alle PDFs
+                    total_pdfs = len(empfang_pdfs)
+                    for pdf_idx, empfang_pdf in enumerate(empfang_pdfs):
+                        if total_pdfs > 1:
+                            st.info(f"📄 Verarbeite PDF {pdf_idx + 1}/{total_pdfs}: {empfang_pdf.name}")
 
-                        akt_info = erkenner.erkenne_aktenzeichen(doc['text'])
-                        sb_aus_text = erkenner.erkenne_sachbearbeiter_aus_text(doc['text'])
-                        analyse = analyzer.analysiere_dokument(doc['text'], akt_info)
-                        sb = erkenner.ermittle_sachbearbeiter(akt_info, analyse, sachbearbeiter_aus_text=sb_aus_text)
-                        sachbearbeiter_stats[sb] = sachbearbeiter_stats.get(sb, 0) + 1
+                        pdf_bytes = empfang_pdf.getvalue()
 
-                        dateiname = erkenner.generiere_dateiname(
-                            akt_info.get('internes_az'),
-                            analyse.get('mandant'),
-                            analyse.get('gegner'),
-                            analyse.get('datum'),
-                            analyse.get('stichworte', []),
-                            aktenkurzbezeichnung=akt_info.get('aktenkurzbezeichnung')
-                        )
+                        # Speichere PDF temporär
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                            tmp.write(pdf_bytes)
+                            pdf_path = tmp.name
 
-                        alle_daten.append({
-                            'dokument': doc,
-                            'aktenzeichen_info': akt_info,
-                            'analyse': analyse,
-                            'sachbearbeiter': sb,
-                            'dateiname': dateiname
-                        })
+                        excel_path = storage.aktenregister_file
+                        erkenner = AktenzeichenErkenner(excel_path, storage=storage)
+
+                        processor = PDFProcessor(pdf_path, debug=True, trennmodus="Text 'Trennseite'", excel_path=excel_path)
+                        dokumente, debug_info = processor.verarbeite_pdf()
+
+                        st.info(f"📄 {len(dokumente)} Dokumente erkannt in {empfang_pdf.name}")
+
+                        training_db = TrainingDatabase(storage.storage_dir)
+                        analyzer = DocumentAnalyzer(current_api_key, api_provider=api_provider, training_db=training_db)
+
+                        progress = st.progress(0)
+                        for i, doc in enumerate(dokumente):
+                            progress.progress((i + 1) / len(dokumente))
+
+                            akt_info = erkenner.erkenne_aktenzeichen(doc['text'])
+                            sb_aus_text = erkenner.erkenne_sachbearbeiter_aus_text(doc['text'])
+                            analyse = analyzer.analysiere_dokument(doc['text'], akt_info)
+                            sb = erkenner.ermittle_sachbearbeiter(akt_info, analyse, sachbearbeiter_aus_text=sb_aus_text)
+                            sachbearbeiter_stats[sb] = sachbearbeiter_stats.get(sb, 0) + 1
+
+                            dateiname = erkenner.generiere_dateiname(
+                                akt_info.get('internes_az'),
+                                analyse.get('mandant'),
+                                analyse.get('gegner'),
+                                analyse.get('datum'),
+                                analyse.get('stichworte', []),
+                                aktenkurzbezeichnung=akt_info.get('aktenkurzbezeichnung')
+                            )
+
+                            alle_daten.append({
+                                'dokument': doc,
+                                'aktenzeichen_info': akt_info,
+                                'analyse': analyse,
+                                'sachbearbeiter': sb,
+                                'dateiname': dateiname
+                            })
 
                     # ZIP-Dateien erstellen mit erweitertem Dateinamen
                     scanner_name = _extract_scanner_name(st.session_state.get('empfang_upload_name', ''))
