@@ -1278,9 +1278,12 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
     st.header("📬 Dashboard Empfang")
     st.caption("Einfache Posteingangsverarbeitung: PDF hochladen, verarbeiten, herunterladen oder versenden")
 
-    # 1. API Key Anzeige (bereits in Sidebar konfiguriert)
+    # 1. API Key Status - Prüfe zuerst Streamlit Secrets
     if current_api_key:
-        st.success(f"✅ {api_provider} API-Key ist konfiguriert")
+        if key_from_secrets:
+            st.success(f"🔐 **{api_provider} API-Key ist aus Streamlit Secrets hinterlegt** - Bereit zur Verarbeitung!")
+        else:
+            st.success(f"✅ {api_provider} API-Key ist konfiguriert")
     else:
         st.warning(f"⚠️ Bitte {api_provider} API-Key in der Sidebar eingeben")
         st.stop()
