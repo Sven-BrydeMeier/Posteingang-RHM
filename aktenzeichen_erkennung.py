@@ -674,9 +674,124 @@ class AktenzeichenErkenner:
             result['confidence'] = 0.40
             return result
 
+        # 4) Alternative AZ-Formate: 1079-25 (mit Bindestrich statt Schrägstrich)
+        alt_candidates = re.findall(r"(?<!\d)(\d{1,4})-(\d{2})(?!\d)", t_no_ws)
+        for num, year in alt_candidates:
+            # Konvertiere zu Standard-Format
+            stamm_alt = f"{num}/{year}"
+            if stamm_alt in self.akte_norm_set:
+                result.update(self._lookup_register(stamm_alt))
+                result['internes_az'] = result['internes_az'] + '?' if result['internes_az'] else stamm_alt + '?'
+                result['quelle'] = 'alt_format:bindestrich'
+                result['confidence'] = 0.50
+                result['unsicher'] = True
+                return result
+
+        # 5) Mandanten-Suche: Suche Mandantennamen im Text und vergleiche mit Register
+        mandant_result = self._suche_mandant_im_text(text)
+        if mandant_result:
+            result.update(mandant_result)
+            result['internes_az'] = result['internes_az'] + '?' if result['internes_az'] else None
+            result['quelle'] = 'mandant_match'
+            result['confidence'] = 0.35
+            result['unsicher'] = True
+            return result
+
         # Externe Aktenzeichen sammeln (immer)
         result['externe_az'] = self._suche_externe_aktenzeichen(text)
         result['quelle'] = 'no_match'
+
+        return result
+
+    def _suche_mandant_im_text(self, text: str) -> Optional[Dict]:
+        """
+        Sucht Mandantennamen im Text und vergleicht mit dem Aktenregister.
+        Letzte Fallback-Methode - Ergebnis wird mit ? gekennzeichnet.
+        """
+        if self.akten_register.empty:
+            return None
+
+        # Mögliche Spalten für Mandanten/Kurzbezeichnung
+        mandant_spalten = ['Mandant', 'Kurzbez.', 'Kurzbezeichnung', 'Aktenkurzbezeichnung']
+
+        text_lower = text.lower()
+
+        # Kanzlei-Namen ausschließen
+        ausschluss = {
+            'meier', 'meyer', 'radtke', 'heigener', 'marquardsen', 'ostertun',
+            'vollbrecht', 'fürsen', 'goeser', 'herberg', 'rückborn', 'akkoc',
+            'tönjes', 'litzenroth', 'hingst', 'kaya', 'stöcken'
+        }
+
+        beste_treffer = []
+
+        for spalte in mandant_spalten:
+            if spalte not in self.akten_register.columns:
+                continue
+
+            for idx, row in self.akten_register.iterrows():
+                wert = row.get(spalte)
+                if pd.isna(wert) or not str(wert).strip():
+                    continue
+
+                mandant = str(wert).strip()
+
+                # Extrahiere einzelne Namen aus der Kurzbezeichnung
+                # Format oft: "Müller ./. Schmidt" oder "Firma GmbH"
+                namen = re.split(r'\s*[./]+\s*|\s+', mandant)
+                namen = [n.strip() for n in namen if len(n.strip()) >= 4]
+
+                for name in namen:
+                    name_lower = name.lower()
+
+                    # Überspringe ausgeschlossene Namen
+                    if name_lower in ausschluss:
+                        continue
+
+                    # Suche Name im Text (als ganzes Wort)
+                    if re.search(rf'\b{re.escape(name_lower)}\b', text_lower):
+                        stamm = row.get('Akte')
+                        if pd.notna(stamm) and str(stamm).strip():
+                            stamm_norm = self._norm_akte(str(stamm))
+                            beste_treffer.append({
+                                'stamm': stamm_norm,
+                                'matched_name': name,
+                                'spalte': spalte,
+                                'row': row
+                            })
+
+        if not beste_treffer:
+            return None
+
+        # Nimm den ersten Treffer (könnte verbessert werden mit Scoring)
+        treffer = beste_treffer[0]
+        stamm = treffer['stamm']
+
+        result = {
+            'stamm': stamm,
+            'internes_az': stamm,
+            'kuerzel': None,
+            'aktenkurzbezeichnung': None,
+            'matched_mandant': treffer['matched_name']
+        }
+
+        row = treffer['row']
+
+        # SB-Kürzel
+        if 'SB' in self.akten_register.columns:
+            sb = row.get('SB')
+            if pd.notna(sb) and str(sb).strip():
+                kuerzel = str(sb).strip().upper()
+                result['kuerzel'] = kuerzel
+                result['internes_az'] = f"{stamm}{kuerzel}"
+
+        # Kurzbezeichnung
+        for spalte in ['Kurzbez.', 'Kurzbezeichnung', 'Aktenkurzbezeichnung', 'Bez', 'Bezeichnung', 'KurzBez']:
+            if spalte in self.akten_register.columns:
+                wert = row.get(spalte)
+                if pd.notna(wert) and str(wert).strip():
+                    result['aktenkurzbezeichnung'] = str(wert).strip()
+                    break
 
         return result
 

@@ -173,7 +173,7 @@ def write_chunk_pdf(doc: fitz.Document, pages: List[int]) -> bytes:
 # ----------------------------
 # AKTENZEICHEN-ERKENNUNG (robust, OCR-tolerant)
 # ----------------------------
-def detect_akte(text: str, reg_set: Set[str]) -> Tuple[Optional[str], float, str]:
+def detect_akte(text: str, reg_set: Set[str], df_reg: pd.DataFrame = None) -> Tuple[Optional[str], float, str, bool]:
     """
     Detect internal Akte (e.g. '1547/21') from OCR-ish page text.
 
@@ -181,11 +181,13 @@ def detect_akte(text: str, reg_set: Set[str]) -> Tuple[Optional[str], float, str
     1) Look for 'Ihr Zeichen' (OCR variants like 'thrZeichen') nearby
     2) Look for 'Gz.:' (often appears in judgments)
     3) Fallback: take all occurrences of d{1,4}/d{2} and pick one that exists in register
+    4) Alternative Format: 1079-25 (mit Bindestrich)
+    5) Mandanten-Suche im Text
 
-    Returns: (akte_norm, confidence, reason)
+    Returns: (akte_norm, confidence, reason, unsicher)
     """
     if not text:
-        return None, 0.0, "no_text"
+        return None, 0.0, "no_text", False
 
     # Remove whitespace to survive OCR that loses spacing
     t_no_ws = re.sub(r"\s+", "", text.replace("\xa0", " "))
@@ -195,16 +197,16 @@ def detect_akte(text: str, reg_set: Set[str]) -> Tuple[Optional[str], float, str
     if m:
         akte_norm = _norm(m.group(1))
         if akte_norm in reg_set:
-            return akte_norm, 0.95, "context:hrZeichen"
-        return akte_norm, 0.70, "context:hrZeichen_not_in_register"
+            return akte_norm, 0.95, "context:hrZeichen", False
+        return akte_norm, 0.70, "context:hrZeichen_not_in_register", False
 
     # 2) Gz.: (Geschäftszeichen der Kanzlei im Urteil/Schriftsatz)
     m = re.search(r"Gz\.?:[^0-9]{0,20}([0-9]{1,4}/[0-9]{2})", t_no_ws, flags=re.IGNORECASE)
     if m:
         akte_norm = _norm(m.group(1))
         if akte_norm in reg_set:
-            return akte_norm, 0.95, "context:Gz"
-        return akte_norm, 0.70, "context:Gz_not_in_register"
+            return akte_norm, 0.95, "context:Gz", False
+        return akte_norm, 0.70, "context:Gz_not_in_register", False
 
     # 3) Fallback: all patterns like 1547/21
     candidates = re.findall(r"(?<!\d)(\d{1,4}/\d{2})", t_no_ws)
@@ -212,17 +214,80 @@ def detect_akte(text: str, reg_set: Set[str]) -> Tuple[Optional[str], float, str
     candidates_in = [c for c in candidates_norm if c in reg_set]
 
     if len(set(candidates_in)) == 1:
-        return candidates_in[0], 0.80, "fallback:unique_in_register"
+        return candidates_in[0], 0.80, "fallback:unique_in_register", False
 
     if len(candidates_in) > 1:
         # Nimm das erste im Text vorkommende
         earliest = min(set(candidates_in), key=lambda c: t_no_ws.find(c))
-        return earliest, 0.60, f"fallback:multiple_in_register({sorted(set(candidates_in))[:5]})"
+        return earliest, 0.60, f"fallback:multiple_in_register({sorted(set(candidates_in))[:5]})", False
 
     if candidates_norm:
-        return candidates_norm[0], 0.40, "fallback:pattern_not_in_register"
+        return candidates_norm[0], 0.40, "fallback:pattern_not_in_register", False
 
-    return None, 0.0, "no_match"
+    # 4) Alternative AZ-Formate: 1079-25 (mit Bindestrich statt Schrägstrich)
+    alt_candidates = re.findall(r"(?<!\d)(\d{1,4})-(\d{2})(?!\d)", t_no_ws)
+    for num, year in alt_candidates:
+        # Konvertiere zu Standard-Format
+        stamm_alt = f"{num}/{year}"
+        if stamm_alt in reg_set:
+            return stamm_alt, 0.50, "alt_format:bindestrich", True  # unsicher=True
+
+    # 5) Mandanten-Suche: Suche Mandantennamen im Text
+    if df_reg is not None and not df_reg.empty:
+        mandant_result = _suche_mandant_im_text(text, df_reg)
+        if mandant_result:
+            return mandant_result, 0.35, "mandant_match", True  # unsicher=True
+
+    return None, 0.0, "no_match", False
+
+
+def _suche_mandant_im_text(text: str, df_reg: pd.DataFrame) -> Optional[str]:
+    """
+    Sucht Mandantennamen im Text und vergleicht mit dem Aktenregister.
+    Letzte Fallback-Methode.
+    """
+    # Mögliche Spalten für Mandanten/Kurzbezeichnung
+    mandant_spalten = ['Mandant', 'Kurzbez', 'Kurzbezeichnung']
+
+    text_lower = text.lower()
+
+    # Kanzlei-Namen ausschließen
+    ausschluss = {
+        'meier', 'meyer', 'radtke', 'heigener', 'marquardsen', 'ostertun',
+        'vollbrecht', 'fürsen', 'goeser', 'herberg', 'rückborn', 'akkoc',
+        'tönjes', 'litzenroth', 'hingst', 'kaya', 'stöcken'
+    }
+
+    for spalte in mandant_spalten:
+        if spalte not in df_reg.columns:
+            continue
+
+        for idx, row in df_reg.iterrows():
+            wert = row.get(spalte)
+            if pd.isna(wert) or not str(wert).strip():
+                continue
+
+            mandant = str(wert).strip()
+
+            # Extrahiere einzelne Namen aus der Kurzbezeichnung
+            # Format oft: "Müller ./. Schmidt" oder "Firma GmbH"
+            namen = re.split(r'\s*[./]+\s*|\s+', mandant)
+            namen = [n.strip() for n in namen if len(n.strip()) >= 4]
+
+            for name in namen:
+                name_lower = name.lower()
+
+                # Überspringe ausgeschlossene Namen
+                if name_lower in ausschluss:
+                    continue
+
+                # Suche Name im Text (als ganzes Wort)
+                if re.search(rf'\b{re.escape(name_lower)}\b', text_lower):
+                    akte = row.get('Akte')
+                    if pd.notna(akte) and str(akte).strip():
+                        return _norm(str(akte))
+
+    return None
 
 
 def lookup_akte(df_reg: pd.DataFrame, akte_norm: str) -> Optional[Dict]:
@@ -359,7 +424,7 @@ def build_proposals(doc: fitz.Document, chunks: List[List[int]], df_reg: pd.Data
         t = extract_chunk_text(doc, pages, max_pages=3)
 
         # AKTENZEICHEN-ERKENNUNG (neue robuste Methode)
-        akte_norm, confidence, reason = detect_akte(t, reg_set)
+        akte_norm, confidence, reason, unsicher = detect_akte(t, reg_set, df_reg)
 
         dt = extract_date(t)
         sender = extract_sender(t)
@@ -376,6 +441,10 @@ def build_proposals(doc: fitz.Document, chunks: List[List[int]], df_reg: pd.Data
             akte_out = akte_norm if akte_norm else "Unbekannt"
             sb_out = ""
             kb_out = ""
+
+        # Bei unsicherer Erkennung (Bindestrich-Format oder Mandanten-Match) -> "?" anhängen
+        if unsicher and akte_out and akte_out != "Unbekannt":
+            akte_out = akte_out + "?"
 
         date_iso = _date_to_iso(dt) if dt else "Unbekanntes-Datum"
 
