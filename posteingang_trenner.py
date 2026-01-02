@@ -66,11 +66,27 @@ def load_aktenregister(xlsx_bytes: bytes) -> Tuple[pd.DataFrame, Set[str]]:
     Load Aktenregister Excel.
     Returns DataFrame and set of normalized Akte numbers for quick lookup.
     """
-    df = pd.read_excel(io.BytesIO(xlsx_bytes), dtype=str)
-    df.columns = [str(c) for c in df.columns]
+    # Versuche verschiedene Header-Zeilen (0, 1, 2)
+    for header_row in [1, 0, 2]:
+        try:
+            df = pd.read_excel(io.BytesIO(xlsx_bytes), header=header_row, dtype=str)
+            df.columns = [str(c) for c in df.columns]
 
-    # Flexible Spaltenzuordnung
-    colmap = {re.sub(r"[^a-z0-9]+", "", str(c).lower()): c for c in df.columns}
+            # Prüfe ob sinnvolle Spalten vorhanden
+            unnamed_count = sum(1 for col in df.columns if str(col).startswith('Unnamed'))
+            if unnamed_count < len(df.columns) * 0.5:
+                break
+        except Exception:
+            continue
+    else:
+        df = pd.read_excel(io.BytesIO(xlsx_bytes), header=1, dtype=str)
+        df.columns = [str(c) for c in df.columns]
+
+    # Flexible Spaltenzuordnung - normalisiere Spaltennamen
+    colmap = {}
+    for col in df.columns:
+        col_norm = re.sub(r"[^a-z0-9]+", "", str(col).lower())
+        colmap[col_norm] = col
 
     # Finde Akte-Spalte
     akte_col = None
@@ -96,12 +112,14 @@ def load_aktenregister(xlsx_bytes: bytes) -> Tuple[pd.DataFrame, Set[str]]:
             kurzbez_col = colmap[key]
             break
 
-    # Normalisiere
+    # Normalisiere und erstelle standardisierte Spalten
     df["akte_norm"] = df[akte_col].apply(_norm)
     df["Akte"] = df[akte_col]
 
     if sb_col:
         df["SB"] = df[sb_col].fillna("").astype(str).str.strip().str.upper()
+        # FU zu FÜ normalisieren
+        df["SB"] = df["SB"].replace('FU', 'FÜ')
     else:
         df["SB"] = ""
 
@@ -542,6 +560,16 @@ if not reg_file or not pdf_file:
 
 try:
     df_reg, reg_set = load_aktenregister(reg_file.getvalue())
+    # Debug: Zeige gefundene Spalten in der Sidebar
+    with st.sidebar:
+        st.markdown("### Register-Info")
+        st.caption(f"Akten: {len(reg_set)}")
+        if "SB" in df_reg.columns:
+            sb_values = df_reg["SB"].dropna().unique()
+            sb_values = [s for s in sb_values if s.strip()]
+            st.caption(f"SB-Kürzel: {', '.join(sorted(set(sb_values))[:10])}")
+        else:
+            st.warning("⚠️ SB-Spalte nicht gefunden!")
 except Exception as e:
     st.error("Aktenregister konnte nicht geladen werden.")
     st.exception(e)
