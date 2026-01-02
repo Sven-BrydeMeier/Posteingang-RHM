@@ -533,6 +533,43 @@ def build_zip(df_final: pd.DataFrame, chunk_pdfs: List[bytes]) -> bytes:
 
 
 # ----------------------------
+# Hilfsfunktion: Scanner-Name extrahieren
+# ----------------------------
+def _extract_scanner_name(filename: str) -> str:
+    """
+    Extrahiert den Scanner-Namen aus dem Dateinamen.
+    Beispiele:
+    - "Posteingang_Joanna_Hingst_2024-12-15.pdf" -> "Joanna_Hingst"
+    - "Scan_Max_Mustermann.pdf" -> "Max_Mustermann"
+    """
+    if not filename:
+        return ""
+
+    # Entferne Dateiendung
+    name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+
+    # Muster 1: Posteingang_Name_Name_Datum
+    match = re.search(r'(?:Posteingang|Scan|Post)_([A-Za-zäöüÄÖÜß]+_[A-Za-zäöüÄÖÜß]+)', name, re.IGNORECASE)
+    if match:
+        return match.group(1)
+
+    # Muster 2: Name_Name am Ende (vor Datum)
+    match = re.search(r'([A-Za-zäöüÄÖÜß]+_[A-Za-zäöüÄÖÜß]+)(?:_\d{4}[-_]\d{2}[-_]\d{2})?$', name)
+    if match:
+        candidate = match.group(1)
+        keywords = ['nicht_zugeordnet', 'Fristen_und', 'Gesamt_Excel', 'getrennt_und']
+        if candidate.lower() not in [k.lower() for k in keywords]:
+            return candidate
+
+    # Muster 3: Nur ein Name
+    match = re.search(r'(?:Posteingang|Scan|Post)_([A-Za-zäöüÄÖÜß]+)', name, re.IGNORECASE)
+    if match:
+        return match.group(1)
+
+    return ""
+
+
+# ----------------------------
 # Streamlit UI
 # ----------------------------
 st.set_page_config(page_title="Posteingang trennen & benennen", layout="wide")
@@ -630,11 +667,20 @@ if auto_rebuild:
 
 zip_bytes = build_zip(df_final, chunk_pdfs)
 
+# Erweiterter ZIP-Dateiname mit Scanner-Name und Datum
+scanner_name = _extract_scanner_name(pdf_file.name) if pdf_file else ""
+scan_datum = datetime.now().strftime('%Y-%m-%d')
+
+zip_filename = "posteingang_getrennt"
+if scanner_name:
+    zip_filename += f"_{scanner_name}"
+zip_filename += f"_{scan_datum}.zip"
+
 with col2:
     st.download_button(
-        label="ZIP herunterladen (getrennte PDFs + summary.csv)",
+        label=f"ZIP herunterladen ({zip_filename})",
         data=zip_bytes,
-        file_name="posteingang_getrennt_und_benannt.zip",
+        file_name=zip_filename,
         mime="application/zip",
     )
 

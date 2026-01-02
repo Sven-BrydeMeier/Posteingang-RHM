@@ -84,7 +84,9 @@ class EmailSender:
         sachbearbeiter: str,
         zip_data: bytes,
         anzahl_dokumente: int,
-        datum: Optional[str] = None
+        datum: Optional[str] = None,
+        zip_filename: Optional[str] = None,
+        scanner_name: Optional[str] = None
     ) -> bool:
         """
         Sendet ZIP-Datei per Email an RENO
@@ -96,6 +98,8 @@ class EmailSender:
             zip_data: ZIP-Datei als Bytes
             anzahl_dokumente: Anzahl der Dokumente in der ZIP
             datum: Datum der Verarbeitung (optional)
+            zip_filename: Benutzerdefinierter ZIP-Dateiname (optional)
+            scanner_name: Name des Scanners für Email-Text (optional)
 
         Returns:
             True bei Erfolg, False bei Fehler
@@ -112,6 +116,7 @@ class EmailSender:
             msg['Subject'] = f"Posteingang {sachbearbeiter} - {datum_str} ({anzahl_dokumente} Dokumente)"
 
             # Email-Text
+            scanner_info = f"\n- Scanner: {scanner_name}" if scanner_name else ""
             body = f"""Hallo {reno_name},
 
 anbei erhalten Sie den verarbeiteten Posteingang für {sachbearbeiter_name}.
@@ -119,7 +124,7 @@ anbei erhalten Sie den verarbeiteten Posteingang für {sachbearbeiter_name}.
 📊 Details:
 - Sachbearbeiter: {sachbearbeiter_name}
 - Anzahl Dokumente: {anzahl_dokumente}
-- Datum: {datum_str}
+- Datum: {datum_str}{scanner_info}
 
 Die ZIP-Datei enthält alle sortierten PDF-Dokumente sowie die Excel-Übersicht mit Fristen und Metadaten.
 
@@ -129,13 +134,14 @@ RHM Posteingangs-System
 
             msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
-            # ZIP-Datei anhängen
+            # ZIP-Datei anhängen - verwende benutzerdefinierten Dateinamen falls vorhanden
+            actual_zip_filename = zip_filename if zip_filename else f"{sachbearbeiter}.zip"
             zip_attachment = MIMEBase('application', 'zip')
             zip_attachment.set_payload(zip_data)
             encoders.encode_base64(zip_attachment)
             zip_attachment.add_header(
                 'Content-Disposition',
-                f'attachment; filename="{sachbearbeiter}.zip"'
+                f'attachment; filename="{actual_zip_filename}"'
             )
             msg.attach(zip_attachment)
 
@@ -156,7 +162,9 @@ RHM Posteingangs-System
         reno_auswahl: Dict[str, List[str]],
         zip_dateien: Dict[str, bytes],
         sachbearbeiter_stats: Dict[str, int],
-        datum: Optional[str] = None
+        datum: Optional[str] = None,
+        scanner_name: Optional[str] = None,
+        scan_datum: Optional[str] = None
     ) -> Dict[str, bool]:
         """
         Sendet mehrere ZIP-Dateien an ausgewählte RENOs
@@ -166,6 +174,8 @@ RHM Posteingangs-System
             zip_dateien: Dict {sachbearbeiter: zip_bytes}
             sachbearbeiter_stats: Dict {sachbearbeiter: anzahl_dokumente}
             datum: Datum der Verarbeitung (optional)
+            scanner_name: Name des Scanners (optional, für Dateiname)
+            scan_datum: Datum des Scans (optional, für Dateiname)
 
         Returns:
             Dict mit Versand-Status pro Email {email: success}
@@ -178,6 +188,14 @@ RHM Posteingangs-System
 
             zip_data = zip_dateien[sachbearbeiter]
             anzahl_dokumente = sachbearbeiter_stats.get(sachbearbeiter, 0)
+
+            # Erweiterter ZIP-Dateiname
+            zip_filename = f"{sachbearbeiter}"
+            if scanner_name:
+                zip_filename += f"_{scanner_name}"
+            if scan_datum:
+                zip_filename += f"_{scan_datum}"
+            zip_filename += ".zip"
 
             for reno_email in reno_emails:
                 # Finde RENO-Namen
@@ -194,7 +212,9 @@ RHM Posteingangs-System
                     sachbearbeiter=sachbearbeiter,
                     zip_data=zip_data,
                     anzahl_dokumente=anzahl_dokumente,
-                    datum=datum
+                    datum=datum,
+                    zip_filename=zip_filename,
+                    scanner_name=scanner_name
                 )
 
                 results[f"{sachbearbeiter} → {reno_email}"] = success

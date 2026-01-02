@@ -34,6 +34,44 @@ from user_dashboard import UserDashboard
 _now = datetime.now()
 VERSION = f"8.{_now.strftime('%y.%m.%d.%H.%M')}"  # Version 8, Multi-User-System
 
+# Hilfsfunktion: Extrahiere Scanner-Namen aus Dateinamen
+def _extract_scanner_name(filename: str) -> str:
+    """
+    Extrahiert den Scanner-Namen aus dem Dateinamen.
+    Beispiele:
+    - "Posteingang_Joanna_Hingst_2024-12-15.pdf" -> "Joanna_Hingst"
+    - "Scan_Max_Mustermann.pdf" -> "Max_Mustermann"
+    - "dokument.pdf" -> ""
+    """
+    import re
+    if not filename:
+        return ""
+
+    # Entferne Dateiendung
+    name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+
+    # Versuche bekannte Muster
+    # Muster 1: Posteingang_Name_Name_Datum
+    match = re.search(r'(?:Posteingang|Scan|Post)_([A-Za-zäöüÄÖÜß]+_[A-Za-zäöüÄÖÜß]+)', name, re.IGNORECASE)
+    if match:
+        return match.group(1)
+
+    # Muster 2: Name_Name am Ende (vor Datum)
+    match = re.search(r'([A-Za-zäöüÄÖÜß]+_[A-Za-zäöüÄÖÜß]+)(?:_\d{4}[-_]\d{2}[-_]\d{2})?$', name)
+    if match:
+        # Prüfe ob es nicht ein Keyword ist
+        candidate = match.group(1)
+        keywords = ['nicht_zugeordnet', 'Fristen_und', 'Gesamt_Excel']
+        if candidate.lower() not in [k.lower() for k in keywords]:
+            return candidate
+
+    # Muster 3: Nur ein Name
+    match = re.search(r'(?:Posteingang|Scan|Post)_([A-Za-zäöüÄÖÜß]+)', name, re.IGNORECASE)
+    if match:
+        return match.group(1)
+
+    return ""
+
 st.set_page_config(
     page_title="RHM Posteingangsverarbeitung",
     page_icon="📄",
@@ -1218,9 +1256,245 @@ if current_user['role'] not in ['Administrator', 'Empfang']:
     st.info("ℹ️ **Hinweis**: Der Post-Eingang-Bereich ist nur für Empfang und Administratoren zugänglich.")
     st.markdown("---")
 
-# Haupt-Upload-Bereich (responsive: 1 Spalte auf Mobile, 2 auf Desktop)
+# Dashboard-Auswahl für Empfang/Admin
 if current_user['role'] in ['Administrator', 'Empfang']:
-    st.header("📬 Post-Eingang scannen")
+    dashboard_auswahl = st.radio(
+        "📊 Dashboard auswählen:",
+        ["Dashboard Empfang (Einfach)", "Dashboard Renos (Erweitert)"],
+        horizontal=True,
+        key="dashboard_auswahl"
+    )
+    st.markdown("---")
+
+# ============================================================================
+# DASHBOARD EMPFANG (Einfach) - Nur für Empfang/Admin
+# ============================================================================
+if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl == "Dashboard Empfang (Einfach)":
+    st.header("📬 Dashboard Empfang")
+    st.caption("Einfache Posteingangsverarbeitung: PDF hochladen, verarbeiten, herunterladen oder versenden")
+
+    # 1. API Key Anzeige (bereits in Sidebar konfiguriert)
+    if current_api_key:
+        st.success(f"✅ {api_provider} API-Key ist konfiguriert")
+    else:
+        st.warning(f"⚠️ Bitte {api_provider} API-Key in der Sidebar eingeben")
+        st.stop()
+
+    col_emp1, col_emp2 = st.columns([1, 1], gap="medium")
+
+    with col_emp1:
+        st.subheader("📄 Posteingang hochladen")
+        empfang_pdf = st.file_uploader(
+            "PDF-Datei mit Tagespost (OCR)",
+            type=["pdf"],
+            key="empfang_simple_pdf",
+            help="Laden Sie eine OCR-PDF-Datei hoch"
+        )
+        # Speichere Upload-Metadaten
+        if empfang_pdf:
+            st.session_state.empfang_upload_name = empfang_pdf.name
+            st.session_state.empfang_upload_time = datetime.now()
+
+    with col_emp2:
+        st.subheader("📊 Aktenregister hochladen")
+        if storage.has_aktenregister():
+            stats = storage.get_aktenregister_stats()
+            dt = datetime.fromtimestamp(stats['last_modified'])
+            formatted = dt.strftime('%d.%m.%Y %H:%M')
+            st.success(f"💾 Gespeichertes Register: {stats['count']} Akten\n\n*Zuletzt aktualisiert: {formatted}*")
+
+        empfang_excel = st.file_uploader(
+            "Aktenregister (.xlsx)",
+            type=["xlsx"],
+            key="empfang_simple_excel"
+        )
+
+    # Verarbeitung
+    if empfang_pdf:
+        if st.button("🚀 Verarbeitung starten", type="primary", key="empfang_simple_start"):
+            # Speichere Excel falls hochgeladen
+            if empfang_excel:
+                storage.save_aktenregister_upload(empfang_excel.getvalue())
+
+            if not storage.has_aktenregister():
+                st.error("❌ Bitte zuerst Aktenregister hochladen!")
+                st.stop()
+
+            with st.spinner("📄 Verarbeite Posteingang..."):
+                try:
+                    import tempfile
+                    from pdf_processor import PDFProcessor
+                    from document_analyzer import DocumentAnalyzer
+                    from excel_generator import ExcelGenerator
+                    from training_database import TrainingDatabase
+
+                    pdf_bytes = empfang_pdf.getvalue()
+
+                    # Speichere PDF temporär
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                        tmp.write(pdf_bytes)
+                        pdf_path = tmp.name
+
+                    excel_path = storage.aktenregister_file
+                    erkenner = AktenzeichenErkenner(excel_path, storage=storage)
+
+                    processor = PDFProcessor(pdf_path, debug=True, trennmodus="Text 'Trennseite'", excel_path=excel_path)
+                    dokumente, debug_info = processor.verarbeite_pdf()
+
+                    st.info(f"📄 {len(dokumente)} Dokumente erkannt")
+
+                    training_db = TrainingDatabase(storage.storage_dir)
+                    analyzer = DocumentAnalyzer(current_api_key, api_provider=api_provider, training_db=training_db)
+
+                    alle_daten = []
+                    sachbearbeiter_stats = {}
+
+                    progress = st.progress(0)
+                    for i, doc in enumerate(dokumente):
+                        progress.progress((i + 1) / len(dokumente))
+
+                        akt_info = erkenner.erkenne_aktenzeichen(doc['text'])
+                        sb_aus_text = erkenner.erkenne_sachbearbeiter_aus_text(doc['text'])
+                        analyse = analyzer.analysiere_dokument(doc['text'], akt_info)
+                        sb = erkenner.ermittle_sachbearbeiter(akt_info, analyse, sachbearbeiter_aus_text=sb_aus_text)
+                        sachbearbeiter_stats[sb] = sachbearbeiter_stats.get(sb, 0) + 1
+
+                        dateiname = erkenner.generiere_dateiname(
+                            akt_info.get('internes_az'),
+                            analyse.get('mandant'),
+                            analyse.get('gegner'),
+                            analyse.get('datum'),
+                            analyse.get('stichworte', []),
+                            aktenkurzbezeichnung=akt_info.get('aktenkurzbezeichnung')
+                        )
+
+                        alle_daten.append({
+                            'dokument': doc,
+                            'aktenzeichen_info': akt_info,
+                            'analyse': analyse,
+                            'sachbearbeiter': sb,
+                            'dateiname': dateiname
+                        })
+
+                    # ZIP-Dateien erstellen mit erweitertem Dateinamen
+                    scanner_name = _extract_scanner_name(st.session_state.get('empfang_upload_name', ''))
+                    scan_datum = st.session_state.get('empfang_upload_time', datetime.now()).strftime('%Y-%m-%d')
+
+                    zip_dateien = {}
+                    excel_gen = ExcelGenerator()
+
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        temp_path = Path(temp_dir)
+                        excel_dateien = excel_gen.erstelle_excel_dateien(alle_daten, temp_path)
+
+                        for sb, count in sachbearbeiter_stats.items():
+                            if count > 0:
+                                zip_buffer = BytesIO()
+                                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                                    for daten in alle_daten:
+                                        if daten['sachbearbeiter'] == sb:
+                                            pdf_content = daten['dokument']['pdf_bytes']
+                                            zipf.writestr(daten['dateiname'], pdf_content)
+                                    if sb in excel_dateien:
+                                        zipf.writestr(f"{sb}_Fristen.xlsx", excel_dateien[sb])
+                                zip_dateien[sb] = zip_buffer.getvalue()
+
+                    # Speichere Ergebnisse
+                    st.session_state.empfang_simple_ergebnisse = {
+                        'zip_dateien': zip_dateien,
+                        'sachbearbeiter_stats': sachbearbeiter_stats,
+                        'scanner_name': scanner_name,
+                        'scan_datum': scan_datum
+                    }
+                    st.session_state.empfang_simple_done = True
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"❌ Fehler: {str(e)}")
+                    st.exception(e)
+
+    # Ergebnisse anzeigen
+    if st.session_state.get('empfang_simple_done', False) and 'empfang_simple_ergebnisse' in st.session_state:
+        ergebnisse = st.session_state.empfang_simple_ergebnisse
+        st.success("✅ Verarbeitung abgeschlossen!")
+
+        st.subheader("📊 Verteilung")
+        cols = st.columns(min(3, len(ergebnisse['sachbearbeiter_stats'])))
+        for i, (sb, count) in enumerate(ergebnisse['sachbearbeiter_stats'].items()):
+            if count > 0:
+                with cols[i % len(cols)]:
+                    st.metric(sb, count)
+
+        st.subheader("📥 Downloads")
+        scanner_name = ergebnisse.get('scanner_name', '')
+        scan_datum = ergebnisse.get('scan_datum', '')
+
+        for sb, zip_bytes in ergebnisse['zip_dateien'].items():
+            # Erweiterter Dateiname: SB_ScannerName_Datum.zip
+            zip_name = f"{sb}"
+            if scanner_name:
+                zip_name += f"_{scanner_name}"
+            if scan_datum:
+                zip_name += f"_{scan_datum}"
+            zip_name += ".zip"
+
+            st.download_button(
+                label=f"📦 {zip_name}",
+                data=zip_bytes,
+                file_name=zip_name,
+                mime="application/zip",
+                key=f"empfang_simple_zip_{sb}"
+            )
+
+        # Email-Versand Option
+        with st.expander("📧 Per Email versenden"):
+            st.info("Konfigurieren Sie den Email-Versand in der Sidebar unter SMTP-Einstellungen")
+
+            smtp_server_simple = st.text_input("SMTP Server", value="smtp.office365.com", key="smtp_simple_server")
+            smtp_user_simple = st.text_input("Email-Adresse", key="smtp_simple_user")
+            smtp_pass_simple = st.text_input("Passwort", type="password", key="smtp_simple_pass")
+
+            empfaenger = st.text_input("Empfänger (kommagetrennt)", key="empfang_simple_email_to")
+
+            if st.button("📤 Versenden", key="empfang_simple_send"):
+                if smtp_user_simple and smtp_pass_simple and empfaenger:
+                    try:
+                        sender = EmailSender()
+                        sender.configure(smtp_server_simple, 587, smtp_user_simple, smtp_pass_simple)
+
+                        for email in [e.strip() for e in empfaenger.split(',')]:
+                            for sb, zip_bytes in ergebnisse['zip_dateien'].items():
+                                zip_name = f"{sb}"
+                                if scanner_name:
+                                    zip_name += f"_{scanner_name}"
+                                if scan_datum:
+                                    zip_name += f"_{scan_datum}"
+                                zip_name += ".zip"
+
+                                sender.sende_email(
+                                    empfaenger=email,
+                                    betreff=f"Posteingang {sb} - {scan_datum}",
+                                    text=f"Anbei der Posteingang für {sb}.\n\nScanner: {scanner_name}\nDatum: {scan_datum}",
+                                    anhang_bytes=zip_bytes,
+                                    anhang_name=zip_name
+                                )
+                        st.success("✅ Emails versendet!")
+                    except Exception as e:
+                        st.error(f"❌ Email-Fehler: {str(e)}")
+                else:
+                    st.warning("⚠️ Bitte alle Felder ausfüllen")
+
+        if st.button("🔄 Neuen Posteingang verarbeiten", key="empfang_simple_reset"):
+            for key in ['empfang_simple_ergebnisse', 'empfang_simple_done', 'empfang_upload_name', 'empfang_upload_time']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.rerun()
+
+# ============================================================================
+# DASHBOARD RENOS (Erweitert) - Haupt-Upload-Bereich
+# ============================================================================
+if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl == "Dashboard Renos (Erweitert)":
+    st.header("📬 Dashboard Renos - Post-Eingang scannen")
 
     col1, col2 = st.columns([1, 1], gap="medium")
 
@@ -1232,6 +1506,12 @@ if current_user['role'] in ['Administrator', 'Empfang']:
             accept_multiple_files=True,
             help="Laden Sie eine oder mehrere OCR-PDF-Dateien hoch (Drag & Drop mehrerer Dateien möglich)"
         )
+        # Speichere Upload-Metadaten für ZIP-Dateinamen
+        if uploaded_pdfs:
+            # Verwende den ersten Dateinamen für Scanner-Name-Extraktion
+            first_pdf_name = uploaded_pdfs[0].name if uploaded_pdfs else ""
+            st.session_state.renos_upload_name = first_pdf_name
+            st.session_state.renos_upload_time = datetime.now()
 
     with col2:
         st.subheader("📊 Aktenregister hochladen")
@@ -1668,11 +1948,17 @@ if st.session_state.get('batch_verarbeitet', False):
                         # Gesamt-Excel
                         gesamt_excel = excel_gen.erstelle_gesamt_excel(alle_daten)
 
+                        # Extrahiere Scanner-Name und Scan-Datum
+                        scanner_name = _extract_scanner_name(st.session_state.get('renos_upload_name', ''))
+                        scan_datum = st.session_state.get('renos_upload_time', datetime.now()).strftime('%Y-%m-%d')
+
                         # Speichere Ergebnisse
                         st.session_state.verarbeitung_ergebnisse = {
                             'zip_dateien': dict(zip_dateien),
                             'gesamt_excel': bytes(gesamt_excel),
-                            'sachbearbeiter_stats': dict(st.session_state.sachbearbeiter_stats_accumulated)
+                            'sachbearbeiter_stats': dict(st.session_state.sachbearbeiter_stats_accumulated),
+                            'scanner_name': scanner_name,
+                            'scan_datum': scan_datum
                         }
                         st.session_state.verarbeitung_abgeschlossen = True
                         st.session_state.batch_verarbeitet = False
@@ -1722,6 +2008,10 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
         # Downloads
         st.subheader("📥 Downloads")
 
+        # Hole Scanner-Name und Scan-Datum
+        scanner_name = ergebnisse.get('scanner_name', '')
+        scan_datum = ergebnisse.get('scan_datum', '')
+
         # ZIP-Dateien - Responsive Layout (2 Spalten für bessere Mobile-UX)
         zip_liste = list(ergebnisse['zip_dateien'].items())
 
@@ -1732,10 +2022,18 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
         for idx, (sb, zip_bytes) in enumerate(zip_liste):
             col_index = idx % num_cols
             with cols[col_index]:
+                # Erweiterter Dateiname: SB_ScannerName_Datum.zip
+                zip_name = f"{sb}"
+                if scanner_name:
+                    zip_name += f"_{scanner_name}"
+                if scan_datum:
+                    zip_name += f"_{scan_datum}"
+                zip_name += ".zip"
+
                 st.download_button(
-                    label=f"📦 {sb}.zip",
+                    label=f"📦 {zip_name}",
                     data=zip_bytes,
-                    file_name=f"{sb}.zip",
+                    file_name=zip_name,
                     mime="application/zip",
                     key=f"download_zip_{sb}",
                     width="stretch",
@@ -1927,7 +2225,9 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
                                 reno_auswahl=reno_auswahl,
                                 zip_dateien=ergebnisse['zip_dateien'],
                                 sachbearbeiter_stats=ergebnisse['sachbearbeiter_stats'],
-                                datum=datetime.now().strftime('%d.%m.%Y')
+                                datum=datetime.now().strftime('%d.%m.%Y'),
+                                scanner_name=ergebnisse.get('scanner_name', ''),
+                                scan_datum=ergebnisse.get('scan_datum', '')
                             )
 
                         # Ergebnisse anzeigen
@@ -2243,11 +2543,18 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
                         # Gesamt-Excel
                         gesamt_excel = excel_gen.erstelle_gesamt_excel(alle_daten)
 
+                        # Behalte Scanner-Name und Scan-Datum aus vorherigen Ergebnissen
+                        prev_results = st.session_state.get('verarbeitung_ergebnisse', {})
+                        scanner_name = prev_results.get('scanner_name', _extract_scanner_name(st.session_state.get('renos_upload_name', '')))
+                        scan_datum = prev_results.get('scan_datum', st.session_state.get('renos_upload_time', datetime.now()).strftime('%Y-%m-%d'))
+
                         # Update Ergebnisse
                         st.session_state.verarbeitung_ergebnisse = {
                             'zip_dateien': dict(zip_dateien),
                             'gesamt_excel': bytes(gesamt_excel),
-                            'sachbearbeiter_stats': dict(sachbearbeiter_stats_neu)
+                            'sachbearbeiter_stats': dict(sachbearbeiter_stats_neu),
+                            'scanner_name': scanner_name,
+                            'scan_datum': scan_datum
                         }
 
                         st.success("✅ ZIP-Dateien erfolgreich neu generiert! Bitte scrollen Sie nach oben zu den Downloads.")
