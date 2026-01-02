@@ -82,9 +82,9 @@ def load_aktenregister(xlsx_bytes: bytes) -> Tuple[pd.DataFrame, Set[str]]:
     if not akte_col:
         raise ValueError(f"Spalte 'Akte' nicht gefunden. Vorhanden: {list(df.columns)}")
 
-    # Finde SB-Spalte
+    # Finde SB-Spalte (Sachbearbeiter / Rechtsanwalt)
     sb_col = None
-    for key in ["sb", "sachbearbeiter"]:
+    for key in ["sb", "sachbearbeiter", "ra", "rechtsanwalt", "anwalt"]:
         if key in colmap:
             sb_col = colmap[key]
             break

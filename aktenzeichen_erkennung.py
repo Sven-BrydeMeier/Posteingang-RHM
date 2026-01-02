@@ -242,7 +242,7 @@ class AktenzeichenErkenner:
                 col_lower = str(col).lower().strip()
                 if 'akt' in col_lower and 'Akte' not in df.columns:
                     column_mapping[col] = 'Akte'
-                elif col_lower in ['sb', 'sachbearbeiter', 'bearbeiter'] and 'SB' not in df.columns:
+                elif col_lower in ['sb', 'sachbearbeiter', 'bearbeiter', 'ra', 'rechtsanwalt', 'anwalt'] and 'SB' not in df.columns:
                     column_mapping[col] = 'SB'
 
             if column_mapping:
