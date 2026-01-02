@@ -373,52 +373,28 @@ def two_word_kurzbez_from_content(text: str) -> str:
 
 
 def match_register_row(df_reg: pd.DataFrame, az: Optional[str], sb: Optional[str], text: str) -> Optional[pd.Series]:
-    if az:
-        m = df_reg[df_reg["Akte_norm"] == az.strip().lower()]
-        if sb:
-            m2 = m[m["SB_norm"] == sb.strip().upper()]
-            if len(m2) >= 1:
-                return m2.iloc[0]
-        if len(m) >= 1:
-            return m.iloc[0]
+    """
+    Sucht eine passende Akte im Register NUR wenn ein Aktenzeichen erkannt wurde.
 
-    # Bereinige Text von Kanzlei-Adressen für Kurzbez-Matching
-    # Entferne typische Kanzlei-Adresszeilen um falsche Matches zu vermeiden
-    text_bereinigt = text
-    kanzlei_patterns = [
-        r'Radtke,?\s*Heigener\s+und\s+Meier[^\n]*',
-        r'Radtke,?\s*Heigener\s*&\s*Meier[^\n]*',
-        r'RHM[- ]?Kanzlei[^\n]*',
-        r'(?:Rechtsanwalt|RA|Notar)[^\n]*(?:Meier|Meyer|Marquardsen|Ostertun|Vollbrecht)[^\n]*',
-        r'Sehr\s+geehrte[r]?\s+(?:Herr|Frau)\s+(?:Kollege?|Kollegin)?[^\n]*(?:Meier|Meyer)[^\n]*',
-        r'Mit\s+(?:freundlichen|kollegialen)\s+Grüßen[^\n]*',
-    ]
-    for pat in kanzlei_patterns:
-        text_bereinigt = re.sub(pat, '', text_bereinigt, flags=re.IGNORECASE)
+    WICHTIG: Kein Fallback-Matching über Kurzbezeichnungen!
+    Das führte zu falschen Zuordnungen (z.B. "Meier" in Kanzlei-Adresse).
 
-    # fallback: Kurzbez im Text finden (schwach, aber mit Ausschluss-Prüfung)
-    text_l = text_bereinigt.lower()
-    df2 = df_reg.copy()
-    df2["kb_len"] = df2["Kurzbez"].fillna("").astype(str).str.len()
-    df2 = df2.sort_values("kb_len", ascending=False)
-    for _, row in df2.head(50).iterrows():
-        kb = str(row["Kurzbez"]).strip()
-        if not kb:
-            continue
+    Wenn kein AZ erkannt wird → None zurückgeben → manuelle Zuordnung nötig.
+    """
+    if not az:
+        # Kein AZ erkannt → keine Vermutung, manuelle Zuordnung erforderlich
+        return None
 
-        # WICHTIG: Überspringe Kurzbez, die ausgeschlossene Begriffe sind
-        # (z.B. wenn Kurzbez "Meier" ist und "Meier" in der Kanzlei-Adresse steht)
-        if _ist_ausgeschlossener_begriff(kb):
-            continue
+    # AZ erkannt → im Register suchen
+    m = df_reg[df_reg["Akte_norm"] == az.strip().lower()]
+    if sb:
+        m2 = m[m["SB_norm"] == sb.strip().upper()]
+        if len(m2) >= 1:
+            return m2.iloc[0]
+    if len(m) >= 1:
+        return m.iloc[0]
 
-        # Prüfe auch einzelne Wörter der Kurzbezeichnung
-        kb_words = kb.lower().split()
-        if any(word in AUSGESCHLOSSENE_BEGRIFFE for word in kb_words if len(word) >= 4):
-            continue
-
-        if kb.lower() in text_l:
-            return row
-
+    # AZ nicht im Register gefunden
     return None
 
 
