@@ -2130,21 +2130,39 @@ if (st.session_state.get('verarbeitung_abgeschlossen', False) and
                     )
 
             # Info-Box mit Spalten-Beschreibung
-            with st.expander("ℹ️ Export-Spalten"):
+            with st.expander("ℹ️ Export-Spalten & RA-MICRO Import-Anleitung"):
                 if export_format == "RA-MICRO":
                     st.markdown("""
-                    **RA-MICRO Export enthält:**
-                    - AktenNr
-                    - Dokumenttyp (Posteingang)
-                    - Datum
-                    - Absender
-                    - Empfänger
-                    - Sachbearbeiter
-                    - Dateiname
-                    - Betreff (Stichworte)
-                    - Frist
-                    - Priorität
-                    - Verarbeitet (Timestamp)
+                    ### RA-MICRO 2025 Export
+
+                    **📁 E-Akte Felder:**
+                    - `Akte` / `AktenNr` - Aktenzeichen für E-Akte Zuordnung
+                    - `Rubrik` - Kategorie "Posteingang"
+                    - `Dokumenttyp` - "Schriftsatz"
+                    - `Dokumentart` - "Eingehend"
+
+                    **📬 Postkorb Felder:**
+                    - `Diktatzeichen` / `SB` - Sachbearbeiter-Kürzel
+                    - `Postkorb` - "J" = In Postkorb ablegen
+                    - `PostkorbEmpfänger` - Ziel-Postkorb
+
+                    **📄 Dokument-Metadaten:**
+                    - `Datum`, `Eingangsdatum`
+                    - `Betreff`, `Bemerkung`
+                    - `Absender`, `Empfänger`
+                    - `Dateiname`, `DateiPfad`
+                    - `Frist`, `Wiedervorlage`, `Priorität`
+
+                    ---
+                    ### 📥 Import-Anleitung für RA-MICRO:
+                    1. ZIP-Datei mit PDFs entpacken
+                    2. RA-MICRO → **Akten → Import/Export → Dokumente importieren**
+                    3. Excel-Datei auswählen (Sheet "RA-MICRO Import")
+                    4. Spalten-Mapping prüfen:
+                       - `Akte` → Aktenzeichen
+                       - `Diktatzeichen` → Postkorb-Zuordnung
+                       - `DateiPfad` → Dokument-Pfad
+                    5. **Ergebnis:** Dokumente werden in E-Akte UND Postkorb abgelegt!
                     """)
                 else:
                     st.markdown("""
