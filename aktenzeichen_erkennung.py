@@ -169,6 +169,76 @@ class AktenzeichenErkenner:
         'versicherungsnummer', 'kundennummer'
     ]
 
+    # Deutsche Gerichts-Registerzeichen (zum Ausschluss von Gerichts-AZ)
+    # Format bei Gerichten: [Abteilung] [Registerzeichen] [Nummer]/[Jahr]
+    # z.B. "12 C 456/24", "5 O 123/24", "23 IN 100/24"
+    GERICHTS_REGISTERZEICHEN = [
+        # Amtsgericht - Zivilsachen
+        'C',      # Allgemeine Zivilsachen
+        'H',      # Arrestsachen, einstweilige Verfügungen
+        'M',      # Mahnverfahren
+        'UR',     # Urkundenverfahren
+        # Amtsgericht - Familiensachen
+        'F',      # Familiensachen
+        'FH',     # Familiensachen - Haftsachen
+        # Amtsgericht - Insolvenz (WICHTIG!)
+        'IN',     # Insolvenzverfahren
+        'IK',     # Verbraucherinsolvenzverfahren
+        'IE',     # Insolvenz-Eröffnungsverfahren
+        # Amtsgericht - Strafsachen
+        'Cs',     # Strafbefehlsverfahren
+        'Ds',     # Schöffengericht
+        'Ls',     # Strafrichter
+        'Js',     # Ermittlungsverfahren (Staatsanwaltschaft)
+        'UJs',    # Unbekannte Täter
+        'VRs',    # Verkehrsstrafsachen
+        'OWi',    # Ordnungswidrigkeiten
+        # Amtsgericht - Vollstreckung
+        'DR',     # Zwangsversteigerung
+        'K',      # Konkurssachen (alt)
+        # Landgericht - Zivilsachen
+        'O',      # Allgemeine Zivilsachen 1. Instanz
+        'S',      # Berufungen gegen AG-Urteile
+        'T',      # Beschwerden
+        'OH',     # Selbständiges Beweisverfahren
+        # Landgericht - Strafsachen
+        'Ks',     # Schwurgericht
+        'KLs',    # Große Strafkammer
+        'Ns',     # Berufungen Strafsachen
+        'Qs',     # Beschwerden Strafsachen
+        # Oberlandesgericht
+        'U',      # Berufungen Zivilsachen
+        'W',      # Beschwerden
+        'Ss',     # Revisionen Strafsachen
+        'Ws',     # Beschwerden Strafsachen
+        # Bundesgerichtshof
+        'ZR',     # Zivilrevisionen
+        'ZB',     # Zivilbeschwerden
+        'StR',    # Strafrevisionen
+        'StB',    # Strafbeschwerden
+        'AR',     # Allgemeines Register
+        'AnwZ',   # Anwaltssachen
+        'NotZ',   # Notarsachen
+        # Bundesverfassungsgericht
+        'BvR',    # Verfassungsbeschwerden
+        'BvL',    # Konkrete Normenkontrolle
+        'BvF',    # Abstrakte Normenkontrolle
+        'BvE',    # Organstreit
+        # Verwaltungsgerichte
+        'A',      # Asylsachen
+        'AN',     # Allgemeine Verwaltungssachen
+        # Arbeitsgerichte
+        'Ca',     # Urteilsverfahren
+        'BV',     # Beschlussverfahren
+        'Ga',     # Einstweiliger Rechtsschutz
+        # Sozialgerichte
+        'AS',     # Grundsicherung
+        'SB',     # Schwerbehindertenrecht
+        # Finanzgerichte
+        'K',      # Klageverfahren
+        'V',      # Aussetzungsverfahren
+    ]
+
     def __init__(self, excel_path: Path, storage=None):
         """
         Lädt das Aktenregister und benutzerdefinierte Kürzel.
@@ -197,6 +267,76 @@ class AktenzeichenErkenner:
             return re.sub(r"\s+", "", str(s).replace("\xa0", "")).strip()
 
         return set(self.akten_register['Akte'].apply(_norm).dropna())
+
+    def _ist_gerichts_aktenzeichen(self, text: str, match_pos: int, stamm: str) -> bool:
+        """
+        Prüft ob ein gefundenes Muster Teil eines Gerichts-Aktenzeichens ist.
+
+        Gerichts-AZ haben das Format: [Abteilung] [Registerzeichen] [Nummer]/[Jahr]
+        z.B. "12 C 456/24", "5 O 123/24", "23 IN 100/24"
+
+        Args:
+            text: Der durchsuchte Text (ohne Whitespace-Normalisierung)
+            match_pos: Position des Matches im normalisierten Text
+            stamm: Das gefundene Muster (z.B. "456/24")
+
+        Returns:
+            True wenn es ein Gerichts-AZ ist, False wenn es ein Kanzlei-AZ sein könnte
+        """
+        # Suche im Original-Text nach dem Kontext vor dem Stamm
+        # Wir suchen nach Mustern wie "12 C 456/24" oder "23 IN 100/24"
+
+        # Erstelle Regex für Gerichts-AZ mit diesem Stamm
+        # Format: [1-3 Ziffern] [Leerzeichen] [Registerzeichen] [Leerzeichen] [Stamm]
+        registerzeichen_pattern = '|'.join(re.escape(rz) for rz in self.GERICHTS_REGISTERZEICHEN)
+
+        # Suche nach Gerichts-AZ-Muster mit diesem Stamm
+        gerichts_pattern = rf'\b\d{{1,3}}\s+({registerzeichen_pattern})\s+{re.escape(stamm)}\b'
+
+        if re.search(gerichts_pattern, text, re.IGNORECASE):
+            return True
+
+        return False
+
+    def _ist_valides_internes_aktenzeichen(self, stamm: str, text: str) -> Tuple[bool, str]:
+        """
+        Validiert ob ein Stamm ein gültiges internes Kanzlei-Aktenzeichen ist.
+
+        ZWEI-KRITERIEN-VALIDIERUNG:
+        1. Der Stamm muss im Aktenregister vorhanden sein, ODER
+        2. Der Stamm muss ein gültiges Kanzlei-Kürzel am Ende haben
+
+        ZUSÄTZLICH wird geprüft, ob es sich um ein Gerichts-AZ handeln könnte.
+
+        Args:
+            stamm: Das zu validierende Aktenzeichen (z.B. "151/25" oder "151/25M")
+            text: Der Original-Text zur Kontext-Prüfung
+
+        Returns:
+            Tuple (ist_valid, grund): ist_valid=True wenn valide, grund erklärt warum
+        """
+        stamm_norm = self._norm_akte(stamm)
+
+        # Prüfung 1: Ist es ein Gerichts-Aktenzeichen?
+        if self._ist_gerichts_aktenzeichen(text, 0, stamm_norm):
+            return (False, 'gerichts_aktenzeichen')
+
+        # Kriterium 1: Im Aktenregister vorhanden
+        if stamm_norm in self.akte_norm_set:
+            return (True, 'in_register')
+
+        # Kriterium 2: Hat ein gültiges Kanzlei-Kürzel
+        # Prüfe ob der Stamm mit einem bekannten Kürzel endet
+        for kuerzel in self.KUERZEL:
+            if stamm_norm.upper().endswith(kuerzel):
+                # Extrahiere den Basis-Stamm ohne Kürzel
+                basis = stamm_norm[:-len(kuerzel)]
+                # Prüfe ob Basis das Format \d{1,4}/\d{2} hat
+                if re.match(r'^\d{1,4}/\d{2}$', basis):
+                    return (True, f'hat_kuerzel:{kuerzel}')
+
+        # Weder im Register noch mit Kürzel -> nicht valide
+        return (False, 'nicht_validiert')
 
     def _lade_aktenregister(self, excel_path: Path) -> pd.DataFrame:
         """Lädt aktenregister.xlsx, Blatt 'akten' mit automatischer Header-Erkennung"""
@@ -627,10 +767,39 @@ class AktenzeichenErkenner:
                 result['confidence'] = 0.70
                 return result
 
-        # 2) Fallback: Alle Muster wie 1547/21 finden
+        # 2) Gz.: (Geschäftszeichen der Kanzlei im Urteil/Schriftsatz)
+        m = re.search(r"Gz\.?:[^0-9]{0,20}([0-9]{1,4}/[0-9]{2})", t_no_ws, flags=re.IGNORECASE)
+        if m:
+            stamm = self._norm_akte(m.group(1))
+            if stamm in self.akte_norm_set:
+                result.update(self._lookup_register(stamm))
+                result['quelle'] = 'context:Gz'
+                result['confidence'] = 0.95
+                return result
+            else:
+                result['stamm'] = stamm
+                result['internes_az'] = stamm
+                result['quelle'] = 'context:Gz_not_in_register'
+                result['confidence'] = 0.70
+                return result
+
+        # 3) Fallback: Alle Muster wie 1547/21 finden
+        # WICHTIG: Filtere Gerichts-Aktenzeichen heraus (z.B. "12 C 456/24", "23 IN 100/24")
         candidates = re.findall(r"(?<!\d)(\d{1,4}/\d{2})", t_no_ws)
         candidates_norm = [self._norm_akte(c) for c in candidates]
-        candidates_in = [c for c in candidates_norm if c in self.akte_norm_set]
+
+        # Filtere Kandidaten, die Teil eines Gerichts-Aktenzeichens sind
+        candidates_validated = []
+        gerichts_az_gefunden = []
+        for c in candidates_norm:
+            ist_valid, grund = self._ist_valides_internes_aktenzeichen(c, text)
+            if ist_valid:
+                candidates_validated.append(c)
+            elif grund == 'gerichts_aktenzeichen':
+                gerichts_az_gefunden.append(c)
+
+        # Prüfe Kandidaten im Register (nur validierte)
+        candidates_in = [c for c in candidates_validated if c in self.akte_norm_set]
 
         if len(set(candidates_in)) == 1:
             # Eindeutiger Treffer im Register
@@ -638,6 +807,9 @@ class AktenzeichenErkenner:
             result.update(self._lookup_register(stamm))
             result['quelle'] = 'fallback:unique_in_register'
             result['confidence'] = 0.80
+            # Merke gefundene Gerichts-AZ als externe
+            if gerichts_az_gefunden:
+                result['externe_az'] = gerichts_az_gefunden
             return result
 
         if len(candidates_in) > 1:
@@ -646,18 +818,42 @@ class AktenzeichenErkenner:
             result.update(self._lookup_register(earliest))
             result['quelle'] = f'fallback:multiple_in_register({sorted(set(candidates_in))[:5]})'
             result['confidence'] = 0.60
+            if gerichts_az_gefunden:
+                result['externe_az'] = gerichts_az_gefunden
             return result
 
-        if candidates_norm:
-            # Muster gefunden aber nicht im Register
-            stamm = candidates_norm[0]
+        if candidates_validated:
+            # Validierte Muster gefunden aber nicht im Register
+            # (haben Kanzlei-Kürzel, sind aber nicht registriert)
+            stamm = candidates_validated[0]
             result['stamm'] = stamm
             result['internes_az'] = stamm
-            result['quelle'] = 'fallback:pattern_not_in_register'
-            result['confidence'] = 0.40
+            result['quelle'] = 'fallback:pattern_validated_not_in_register'
+            result['confidence'] = 0.50  # Höhere Konfidenz da validiert
+            if gerichts_az_gefunden:
+                result['externe_az'] = gerichts_az_gefunden
             return result
 
-        # 3) Alternative AZ-Formate: 1079-25 (mit Bindestrich statt Schrägstrich)
+        if candidates_norm and not gerichts_az_gefunden:
+            # Muster gefunden, aber weder validiert noch als Gerichts-AZ erkannt
+            # → Niedrige Konfidenz, könnte falsch-positiv sein
+            stamm = candidates_norm[0]
+            result['stamm'] = stamm
+            result['internes_az'] = stamm + '?'  # Unsicher markieren
+            result['quelle'] = 'fallback:pattern_unvalidated'
+            result['confidence'] = 0.30  # Niedrigere Konfidenz
+            result['unsicher'] = True
+            return result
+
+        # Nur Gerichts-AZ gefunden, kein internes AZ
+        if gerichts_az_gefunden:
+            result['externe_az'] = gerichts_az_gefunden
+            result['quelle'] = 'nur_gerichts_az_gefunden'
+            result['confidence'] = 0.0
+            # Kein internes AZ setzen
+            return result
+
+        # 4) Alternative AZ-Formate: 1079-25 (mit Bindestrich statt Schrägstrich)
         alt_candidates = re.findall(r"(?<!\d)(\d{1,4})-(\d{2})(?!\d)", t_no_ws)
         for num, year in alt_candidates:
             # Konvertiere zu Standard-Format
@@ -670,7 +866,7 @@ class AktenzeichenErkenner:
                 result['unsicher'] = True
                 return result
 
-        # 4) Mandanten-Suche: Suche Mandantennamen im Text und vergleiche mit Register
+        # 5) Mandanten-Suche: Suche Mandantennamen im Text und vergleiche mit Register
         mandant_result = self._suche_mandant_im_text(text)
         if mandant_result:
             result.update(mandant_result)
