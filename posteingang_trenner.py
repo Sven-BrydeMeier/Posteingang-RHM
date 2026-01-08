@@ -4,8 +4,7 @@
 #
 # Aktenzeichen-Erkennung:
 #   1) "Ihr Zeichen" (OCR-Varianten: thrZeichen, lhrZeichen)
-#   2) "Gz.:" (Geschäftszeichen)
-#   3) Fallback: Muster d{1,4}/d{2} die im Register existieren
+#   2) Fallback: Muster d{1,4}/d{2} die im Register existieren
 #
 # Dependencies:
 #   pip install streamlit pandas pymupdf openpyxl
@@ -197,10 +196,9 @@ def detect_akte(text: str, reg_set: Set[str], df_reg: pd.DataFrame = None) -> Tu
 
     Strategy:
     1) Look for 'Ihr Zeichen' (OCR variants like 'thrZeichen') nearby
-    2) Look for 'Gz.:' (often appears in judgments)
-    3) Fallback: take all occurrences of d{1,4}/d{2} and pick one that exists in register
-    4) Alternative Format: 1079-25 (mit Bindestrich)
-    5) Mandanten-Suche im Text
+    2) Fallback: take all occurrences of d{1,4}/d{2} and pick one that exists in register
+    3) Alternative Format: 1079-25 (mit Bindestrich)
+    4) Mandanten-Suche im Text
 
     Returns: (akte_norm, confidence, reason, unsicher)
     """
@@ -218,15 +216,7 @@ def detect_akte(text: str, reg_set: Set[str], df_reg: pd.DataFrame = None) -> Tu
             return akte_norm, 0.95, "context:hrZeichen", False
         return akte_norm, 0.70, "context:hrZeichen_not_in_register", False
 
-    # 2) Gz.: (Geschäftszeichen der Kanzlei im Urteil/Schriftsatz)
-    m = re.search(r"Gz\.?:[^0-9]{0,20}([0-9]{1,4}/[0-9]{2})", t_no_ws, flags=re.IGNORECASE)
-    if m:
-        akte_norm = _norm(m.group(1))
-        if akte_norm in reg_set:
-            return akte_norm, 0.95, "context:Gz", False
-        return akte_norm, 0.70, "context:Gz_not_in_register", False
-
-    # 3) Fallback: all patterns like 1547/21
+    # 2) Fallback: all patterns like 1547/21
     candidates = re.findall(r"(?<!\d)(\d{1,4}/\d{2})", t_no_ws)
     candidates_norm = [_norm(c) for c in candidates]
     candidates_in = [c for c in candidates_norm if c in reg_set]
@@ -242,7 +232,7 @@ def detect_akte(text: str, reg_set: Set[str], df_reg: pd.DataFrame = None) -> Tu
     if candidates_norm:
         return candidates_norm[0], 0.40, "fallback:pattern_not_in_register", False
 
-    # 4) Alternative AZ-Formate: 1079-25 (mit Bindestrich statt Schrägstrich)
+    # 3) Alternative AZ-Formate: 1079-25 (mit Bindestrich statt Schrägstrich)
     alt_candidates = re.findall(r"(?<!\d)(\d{1,4})-(\d{2})(?!\d)", t_no_ws)
     for num, year in alt_candidates:
         # Konvertiere zu Standard-Format
@@ -250,7 +240,7 @@ def detect_akte(text: str, reg_set: Set[str], df_reg: pd.DataFrame = None) -> Tu
         if stamm_alt in reg_set:
             return stamm_alt, 0.50, "alt_format:bindestrich", True  # unsicher=True
 
-    # 5) Mandanten-Suche: Suche Mandantennamen im Text
+    # 4) Mandanten-Suche: Suche Mandantennamen im Text
     if df_reg is not None and not df_reg.empty:
         mandant_result = _suche_mandant_im_text(text, df_reg)
         if mandant_result:
@@ -585,8 +575,7 @@ with st.sidebar:
     st.markdown("""
     **Strategie (Priorität):**
     1. `Ihr Zeichen: 1547/21...` (OCR-tolerant)
-    2. `Gz.: 1547/21` (Geschäftszeichen)
-    3. Fallback: Muster `dddd/dd` im Register
+    2. Fallback: Muster `dddd/dd` im Register
 
     **Keine** Erkennung über Kurzbezeichnungen!
     """)

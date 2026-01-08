@@ -105,7 +105,7 @@ def test_erkennung():
         {
             "name": "6️⃣ Erweitertes Format mit Bereich+ReNo",
             "text": """
-                Gz.: 739/25SQ08TÖ
+                Ihr Zeichen: 739/25SQ08TÖ
 
                 Kostenfestsetzungsbeschluss
             """,

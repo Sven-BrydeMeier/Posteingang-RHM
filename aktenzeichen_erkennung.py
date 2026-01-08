@@ -583,8 +583,7 @@ class AktenzeichenErkenner:
 
         ROBUSTE METHODE (OCR-tolerant):
         1) 'Ihr Zeichen' (OCR-Varianten: thrZeichen, lhrZeichen)
-        2) 'Gz.:' (Geschäftszeichen)
-        3) Fallback: Muster d{1,4}/d{2} NUR wenn im Register vorhanden
+        2) Fallback: Muster d{1,4}/d{2} NUR wenn im Register vorhanden
 
         KEINE Erkennung über Kurzbezeichnungen oder Beteiligte!
 
@@ -628,23 +627,7 @@ class AktenzeichenErkenner:
                 result['confidence'] = 0.70
                 return result
 
-        # 2) Gz.: (Geschäftszeichen der Kanzlei im Urteil/Schriftsatz)
-        m = re.search(r"Gz\.?:[^0-9]{0,20}([0-9]{1,4}/[0-9]{2})", t_no_ws, flags=re.IGNORECASE)
-        if m:
-            stamm = self._norm_akte(m.group(1))
-            if stamm in self.akte_norm_set:
-                result.update(self._lookup_register(stamm))
-                result['quelle'] = 'context:Gz'
-                result['confidence'] = 0.95
-                return result
-            else:
-                result['stamm'] = stamm
-                result['internes_az'] = stamm
-                result['quelle'] = 'context:Gz_not_in_register'
-                result['confidence'] = 0.70
-                return result
-
-        # 3) Fallback: Alle Muster wie 1547/21 finden
+        # 2) Fallback: Alle Muster wie 1547/21 finden
         candidates = re.findall(r"(?<!\d)(\d{1,4}/\d{2})", t_no_ws)
         candidates_norm = [self._norm_akte(c) for c in candidates]
         candidates_in = [c for c in candidates_norm if c in self.akte_norm_set]
@@ -674,7 +657,7 @@ class AktenzeichenErkenner:
             result['confidence'] = 0.40
             return result
 
-        # 4) Alternative AZ-Formate: 1079-25 (mit Bindestrich statt Schrägstrich)
+        # 3) Alternative AZ-Formate: 1079-25 (mit Bindestrich statt Schrägstrich)
         alt_candidates = re.findall(r"(?<!\d)(\d{1,4})-(\d{2})(?!\d)", t_no_ws)
         for num, year in alt_candidates:
             # Konvertiere zu Standard-Format
@@ -687,7 +670,7 @@ class AktenzeichenErkenner:
                 result['unsicher'] = True
                 return result
 
-        # 5) Mandanten-Suche: Suche Mandantennamen im Text und vergleiche mit Register
+        # 4) Mandanten-Suche: Suche Mandantennamen im Text und vergleiche mit Register
         mandant_result = self._suche_mandant_im_text(text)
         if mandant_result:
             result.update(mandant_result)
