@@ -410,3 +410,111 @@ class PersistentStorage:
             Dict mit Kürzel -> {name, category} Mapping
         """
         return self.get_custom_kuerzel()
+
+    # ==================== RENO-ZUORDNUNGEN ====================
+
+    def get_reno_zuordnungen(self) -> Dict[str, list]:
+        """
+        Lädt RENO-Zuordnungen (Empfänger für Sachbearbeiter).
+        Falls keine gespeichert, werden Standardwerte aus EmailSender verwendet.
+
+        Returns:
+            Dict mit Sachbearbeiter-Kürzel -> Liste von {name, email}
+        """
+        reno_file = self.storage_dir / 'reno_zuordnungen.json'
+
+        if reno_file.exists():
+            try:
+                with open(reno_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+
+        # Fallback: Standardwerte aus email_sender
+        from email_sender import EmailSender
+        return EmailSender.RENO_ZUORDNUNGEN.copy()
+
+    def save_reno_zuordnungen(self, zuordnungen: Dict[str, list]) -> None:
+        """
+        Speichert RENO-Zuordnungen.
+
+        Args:
+            zuordnungen: Dict mit Sachbearbeiter-Kürzel -> Liste von {name, email}
+        """
+        reno_file = self.storage_dir / 'reno_zuordnungen.json'
+
+        with open(reno_file, 'w', encoding='utf-8') as f:
+            json.dump(zuordnungen, f, ensure_ascii=False, indent=2)
+
+    def add_reno_zu_sachbearbeiter(self, sachbearbeiter: str, name: str, email: str) -> bool:
+        """
+        Fügt einen RENO zu einem Sachbearbeiter hinzu.
+
+        Args:
+            sachbearbeiter: Kürzel des Sachbearbeiters (z.B. 'SQ')
+            name: Name des RENo
+            email: Email-Adresse des RENO
+
+        Returns:
+            True bei Erfolg, False wenn bereits vorhanden
+        """
+        zuordnungen = self.get_reno_zuordnungen()
+
+        if sachbearbeiter not in zuordnungen:
+            zuordnungen[sachbearbeiter] = []
+
+        # Prüfe ob Email bereits vorhanden
+        for reno in zuordnungen[sachbearbeiter]:
+            if reno['email'].lower() == email.lower():
+                return False
+
+        zuordnungen[sachbearbeiter].append({'name': name, 'email': email})
+        self.save_reno_zuordnungen(zuordnungen)
+        return True
+
+    def remove_reno_von_sachbearbeiter(self, sachbearbeiter: str, email: str) -> bool:
+        """
+        Entfernt einen RENO von einem Sachbearbeiter.
+
+        Args:
+            sachbearbeiter: Kürzel des Sachbearbeiters
+            email: Email-Adresse des zu entfernenden RENO
+
+        Returns:
+            True bei Erfolg, False wenn nicht gefunden
+        """
+        zuordnungen = self.get_reno_zuordnungen()
+
+        if sachbearbeiter not in zuordnungen:
+            return False
+
+        original_length = len(zuordnungen[sachbearbeiter])
+        zuordnungen[sachbearbeiter] = [
+            reno for reno in zuordnungen[sachbearbeiter]
+            if reno['email'].lower() != email.lower()
+        ]
+
+        if len(zuordnungen[sachbearbeiter]) == original_length:
+            return False
+
+        self.save_reno_zuordnungen(zuordnungen)
+        return True
+
+    def get_alle_renos(self) -> list:
+        """
+        Gibt eine deduplizierte Liste aller RENOs zurück.
+
+        Returns:
+            Liste von {name, email} Dicts
+        """
+        zuordnungen = self.get_reno_zuordnungen()
+        seen_emails = set()
+        alle_renos = []
+
+        for renos in zuordnungen.values():
+            for reno in renos:
+                if reno['email'].lower() not in seen_emails:
+                    seen_emails.add(reno['email'].lower())
+                    alle_renos.append(reno)
+
+        return sorted(alle_renos, key=lambda x: x['name'])

@@ -1140,6 +1140,66 @@ if current_user['role'] in ['Administrator', 'Empfang']:
             else:
                 st.warning("⚠️ Beide Felder ausfüllen")
 
+    # RENO-Zuordnungen verwalten (Empfänger für Email-Versand)
+    with st.sidebar.expander("📧 Email-Empfänger verwalten"):
+        st.caption("Zuordnung von Empfängern (RENOs) zu Sachbearbeitern für den Email-Versand")
+
+        reno_zuordnungen = storage.get_reno_zuordnungen()
+
+        # Sachbearbeiter auswählen
+        sb_liste = list(reno_zuordnungen.keys())
+        if 'nicht-zugeordnet' not in sb_liste:
+            sb_liste.append('nicht-zugeordnet')
+
+        selected_sb = st.selectbox(
+            "Sachbearbeiter:",
+            options=sb_liste,
+            key="reno_admin_sb"
+        )
+
+        # Aktuelle Empfänger anzeigen
+        if selected_sb and selected_sb in reno_zuordnungen:
+            st.markdown(f"**Empfänger für {selected_sb}:**")
+            for reno in reno_zuordnungen[selected_sb]:
+                col_r1, col_r2 = st.columns([3, 1])
+                with col_r1:
+                    st.text(f"{reno['name']}\n{reno['email']}")
+                with col_r2:
+                    if st.button("❌", key=f"del_reno_{selected_sb}_{reno['email']}", help="Entfernen"):
+                        if storage.remove_reno_von_sachbearbeiter(selected_sb, reno['email']):
+                            st.success("✅ Entfernt!")
+                            st.rerun()
+
+        st.markdown("---")
+        st.markdown("**Neuen Empfänger hinzufügen:**")
+
+        new_reno_name = st.text_input("Name:", key="new_reno_name", placeholder="Max Mustermann")
+        new_reno_email = st.text_input("Email:", key="new_reno_email", placeholder="max@ra-rhm.de")
+
+        if st.button("➕ Empfänger hinzufügen", key="add_reno_btn"):
+            if new_reno_name and new_reno_email and selected_sb:
+                if storage.add_reno_zu_sachbearbeiter(selected_sb, new_reno_name.strip(), new_reno_email.strip()):
+                    st.success(f"✅ {new_reno_name} zu {selected_sb} hinzugefügt!")
+                    st.rerun()
+                else:
+                    st.warning("⚠️ Email bereits vorhanden")
+            else:
+                st.warning("⚠️ Alle Felder ausfüllen")
+
+        # Neuen Sachbearbeiter für Zuordnungen
+        st.markdown("---")
+        new_sb_for_reno = st.text_input("Neuer Sachbearbeiter (Kürzel):", key="new_sb_reno", max_chars=3)
+        if st.button("➕ Sachbearbeiter anlegen", key="add_sb_reno"):
+            if new_sb_for_reno:
+                sb_upper = new_sb_for_reno.upper().strip()
+                if sb_upper not in reno_zuordnungen:
+                    reno_zuordnungen[sb_upper] = []
+                    storage.save_reno_zuordnungen(reno_zuordnungen)
+                    st.success(f"✅ {sb_upper} angelegt!")
+                    st.rerun()
+                else:
+                    st.info(f"ℹ️ {sb_upper} existiert bereits")
+
     # Benutzer-Übersicht
     all_users = user_manager.get_all_users()
     active_users = [u for u in all_users if u.get('active', True)]
@@ -1363,10 +1423,8 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
                         excel_path = storage.aktenregister_file
                         erkenner = AktenzeichenErkenner(excel_path, storage=storage)
 
-                        processor = PDFProcessor(pdf_path, debug=True, trennmodus="Text 'Trennseite'", excel_path=excel_path)
-                        dokumente, debug_info = processor.verarbeite_pdf()
-
-                        st.info(f"📄 {len(dokumente)} Dokumente erkannt in {empfang_pdf.name}")
+                        processor = PDFProcessor(pdf_path, debug=False, trennmodus="Text 'Trennseite'", excel_path=excel_path)
+                        dokumente, _ = processor.verarbeite_pdf()
 
                         training_db = TrainingDatabase(storage.storage_dir)
                         analyzer = DocumentAnalyzer(current_api_key, api_provider=api_provider, training_db=training_db)
@@ -1438,75 +1496,197 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
     # Ergebnisse anzeigen
     if st.session_state.get('empfang_simple_done', False) and 'empfang_simple_ergebnisse' in st.session_state:
         ergebnisse = st.session_state.empfang_simple_ergebnisse
-        st.success("✅ Verarbeitung abgeschlossen!")
-
-        st.subheader("📊 Verteilung")
-        cols = st.columns(min(3, len(ergebnisse['sachbearbeiter_stats'])))
-        for i, (sb, count) in enumerate(ergebnisse['sachbearbeiter_stats'].items()):
-            if count > 0:
-                with cols[i % len(cols)]:
-                    st.metric(sb, count)
-
-        st.subheader("📥 Downloads")
         scanner_name = ergebnisse.get('scanner_name', '')
         scan_datum = ergebnisse.get('scan_datum', '')
+        total_docs = sum(ergebnisse['sachbearbeiter_stats'].values())
 
-        for sb, zip_bytes in ergebnisse['zip_dateien'].items():
-            # Erweiterter Dateiname: SB_ScannerName_Datum.zip
-            zip_name = f"{sb}"
-            if scanner_name:
-                zip_name += f"_{scanner_name}"
-            if scan_datum:
-                zip_name += f"_{scan_datum}"
-            zip_name += ".zip"
+        # =====================================================================
+        # FERTIG! - Große Erfolgsanzeige
+        # =====================================================================
+        st.markdown("---")
+        st.markdown(f"""
+        <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #28a745 0%, #20c997 100%); border-radius: 10px; margin: 10px 0;">
+            <h1 style="color: white; margin: 0; font-size: 3em;">✅ FERTIG!</h1>
+            <p style="color: white; font-size: 1.2em; margin: 10px 0 0 0;">{total_docs} Dokumente verarbeitet</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-            st.download_button(
-                label=f"📦 {zip_name}",
-                data=zip_bytes,
-                file_name=zip_name,
-                mime="application/zip",
-                key=f"empfang_simple_zip_{sb}"
+        # Verteilung anzeigen
+        st.subheader("📊 Verteilung nach Sachbearbeiter")
+        cols = st.columns(min(4, max(1, len(ergebnisse['sachbearbeiter_stats']))))
+        for i, (sb, count) in enumerate(sorted(ergebnisse['sachbearbeiter_stats'].items())):
+            if count > 0:
+                with cols[i % len(cols)]:
+                    st.metric(sb, f"{count} Dok.")
+
+        st.markdown("---")
+
+        # =====================================================================
+        # Downloads & Email-Versand
+        # =====================================================================
+        col_download, col_email = st.columns(2)
+
+        with col_download:
+            st.subheader("📥 Downloads")
+            for sb, zip_bytes in ergebnisse['zip_dateien'].items():
+                zip_name = f"{sb}"
+                if scanner_name:
+                    zip_name += f"_{scanner_name}"
+                if scan_datum:
+                    zip_name += f"_{scan_datum}"
+                zip_name += ".zip"
+
+                st.download_button(
+                    label=f"📦 {zip_name}",
+                    data=zip_bytes,
+                    file_name=zip_name,
+                    mime="application/zip",
+                    key=f"empfang_simple_zip_{sb}",
+                    use_container_width=True
+                )
+
+        with col_email:
+            st.subheader("📧 Per Email versenden")
+
+            # SMTP-Konfiguration aus Secrets laden
+            smtp_from_secrets = False
+            smtp_server_val = "smtp.office365.com"
+            smtp_port_val = 587
+            smtp_user_val = ""
+            smtp_pass_val = ""
+
+            try:
+                if hasattr(st, 'secrets') and 'smtp' in st.secrets:
+                    smtp_cfg = st.secrets['smtp']
+                    smtp_server_val = smtp_cfg.get('server', smtp_server_val)
+                    smtp_port_val = smtp_cfg.get('port', smtp_port_val)
+                    smtp_user_val = smtp_cfg.get('user', '')
+                    smtp_pass_val = smtp_cfg.get('password', '')
+                    if smtp_user_val and smtp_pass_val:
+                        smtp_from_secrets = True
+            except Exception:
+                pass
+
+            if smtp_from_secrets:
+                st.success("🔐 SMTP-Zugangsdaten aus Secrets geladen")
+            else:
+                st.info("💡 Tipp: SMTP in `.streamlit/secrets.toml` konfigurieren")
+                smtp_server_val = st.text_input("SMTP Server", value=smtp_server_val, key="smtp_emp_server")
+                smtp_user_val = st.text_input("Email-Adresse", key="smtp_emp_user")
+                smtp_pass_val = st.text_input("Passwort", type="password", key="smtp_emp_pass")
+
+            # Empfänger-Auswahl mit Vorschlägen aus RENO-Zuordnungen
+            st.markdown("**Empfänger auswählen:**")
+
+            # Lade RENO-Zuordnungen
+            reno_zuordnungen = storage.get_reno_zuordnungen()
+
+            # Für jeden Sachbearbeiter Empfänger vorschlagen
+            versand_auswahl = {}
+            for sb in ergebnisse['zip_dateien'].keys():
+                verfuegbare_renos = reno_zuordnungen.get(sb, reno_zuordnungen.get('nicht-zugeordnet', []))
+
+                if verfuegbare_renos:
+                    reno_optionen = [f"{r['name']} ({r['email']})" for r in verfuegbare_renos]
+                    ausgewaehlte = st.multiselect(
+                        f"📬 {sb}:",
+                        options=reno_optionen,
+                        default=[reno_optionen[0]] if reno_optionen else [],
+                        key=f"reno_select_{sb}"
+                    )
+                    # Extrahiere Emails aus Auswahl
+                    versand_auswahl[sb] = []
+                    for auswahl in ausgewaehlte:
+                        for reno in verfuegbare_renos:
+                            if f"{reno['name']} ({reno['email']})" == auswahl:
+                                versand_auswahl[sb].append(reno)
+                else:
+                    st.caption(f"⚠️ Keine Empfänger für {sb} konfiguriert")
+
+            # Zusätzliche Empfänger (manuell)
+            extra_emails = st.text_input(
+                "Weitere Empfänger (kommagetrennt)",
+                placeholder="email1@example.com, email2@example.com",
+                key="empfang_extra_emails"
             )
 
-        # Email-Versand Option
-        with st.expander("📧 Per Email versenden"):
-            st.info("Konfigurieren Sie den Email-Versand in der Sidebar unter SMTP-Einstellungen")
-
-            smtp_server_simple = st.text_input("SMTP Server", value="smtp.office365.com", key="smtp_simple_server")
-            smtp_user_simple = st.text_input("Email-Adresse", key="smtp_simple_user")
-            smtp_pass_simple = st.text_input("Passwort", type="password", key="smtp_simple_pass")
-
-            empfaenger = st.text_input("Empfänger (kommagetrennt)", key="empfang_simple_email_to")
-
-            if st.button("📤 Versenden", key="empfang_simple_send"):
-                if smtp_user_simple and smtp_pass_simple and empfaenger:
+            # Versenden-Button
+            if st.button("📤 Jetzt versenden", type="primary", key="empfang_send_btn", use_container_width=True):
+                if not smtp_user_val or not smtp_pass_val:
+                    st.error("❌ SMTP-Zugangsdaten fehlen!")
+                elif not any(versand_auswahl.values()) and not extra_emails:
+                    st.warning("⚠️ Bitte mindestens einen Empfänger auswählen")
+                else:
                     try:
-                        sender = EmailSender()
-                        sender.configure(smtp_server_simple, 587, smtp_user_simple, smtp_pass_simple)
+                        sender = EmailSender(
+                            smtp_server=smtp_server_val,
+                            smtp_port=smtp_port_val,
+                            smtp_user=smtp_user_val,
+                            smtp_password=smtp_pass_val
+                        )
 
-                        for email in [e.strip() for e in empfaenger.split(',')]:
-                            for sb, zip_bytes in ergebnisse['zip_dateien'].items():
-                                zip_name = f"{sb}"
-                                if scanner_name:
-                                    zip_name += f"_{scanner_name}"
-                                if scan_datum:
-                                    zip_name += f"_{scan_datum}"
-                                zip_name += ".zip"
+                        erfolge = 0
+                        fehler = 0
 
-                                sender.sende_email(
-                                    empfaenger=email,
-                                    betreff=f"Posteingang {sb} - {scan_datum}",
-                                    text=f"Anbei der Posteingang für {sb}.\n\nScanner: {scanner_name}\nDatum: {scan_datum}",
-                                    anhang_bytes=zip_bytes,
-                                    anhang_name=zip_name
+                        # Versand an ausgewählte RENOs
+                        for sb, renos in versand_auswahl.items():
+                            if sb not in ergebnisse['zip_dateien']:
+                                continue
+
+                            zip_bytes = ergebnisse['zip_dateien'][sb]
+                            zip_name = f"{sb}"
+                            if scanner_name:
+                                zip_name += f"_{scanner_name}"
+                            if scan_datum:
+                                zip_name += f"_{scan_datum}"
+                            zip_name += ".zip"
+
+                            for reno in renos:
+                                success = sender.sende_zip_an_reno(
+                                    reno_email=reno['email'],
+                                    reno_name=reno['name'],
+                                    sachbearbeiter=sb,
+                                    zip_data=zip_bytes,
+                                    anzahl_dokumente=ergebnisse['sachbearbeiter_stats'].get(sb, 0),
+                                    datum=scan_datum,
+                                    zip_filename=zip_name,
+                                    scanner_name=scanner_name
                                 )
-                        st.success("✅ Emails versendet!")
+                                if success:
+                                    erfolge += 1
+                                else:
+                                    fehler += 1
+
+                        # Versand an zusätzliche Empfänger
+                        if extra_emails:
+                            for email in [e.strip() for e in extra_emails.split(',') if e.strip()]:
+                                for sb, zip_bytes in ergebnisse['zip_dateien'].items():
+                                    zip_name = f"{sb}_{scanner_name}_{scan_datum}.zip" if scanner_name else f"{sb}_{scan_datum}.zip"
+                                    success = sender.sende_zip_an_reno(
+                                        reno_email=email,
+                                        reno_name=email.split('@')[0],
+                                        sachbearbeiter=sb,
+                                        zip_data=zip_bytes,
+                                        anzahl_dokumente=ergebnisse['sachbearbeiter_stats'].get(sb, 0),
+                                        datum=scan_datum,
+                                        zip_filename=zip_name
+                                    )
+                                    if success:
+                                        erfolge += 1
+                                    else:
+                                        fehler += 1
+
+                        if fehler == 0:
+                            st.success(f"✅ {erfolge} Emails erfolgreich versendet!")
+                        else:
+                            st.warning(f"⚠️ {erfolge} erfolgreich, {fehler} fehlgeschlagen")
+
                     except Exception as e:
                         st.error(f"❌ Email-Fehler: {str(e)}")
-                else:
-                    st.warning("⚠️ Bitte alle Felder ausfüllen")
 
-        if st.button("🔄 Neuen Posteingang verarbeiten", key="empfang_simple_reset"):
+        # Reset-Button
+        st.markdown("---")
+        if st.button("🔄 Neuen Posteingang verarbeiten", key="empfang_simple_reset", use_container_width=True):
             for key in ['empfang_simple_ergebnisse', 'empfang_simple_done', 'empfang_upload_name', 'empfang_upload_time']:
                 if key in st.session_state:
                     del st.session_state[key]
