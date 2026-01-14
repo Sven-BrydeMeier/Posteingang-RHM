@@ -1559,21 +1559,43 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
                 if hasattr(st, 'secrets') and 'smtp' in st.secrets:
                     smtp_cfg = st.secrets['smtp']
                     smtp_server_val = smtp_cfg.get('server', smtp_server_val)
-                    smtp_port_val = smtp_cfg.get('port', smtp_port_val)
+                    smtp_port_val = int(smtp_cfg.get('port', smtp_port_val))
                     smtp_user_val = smtp_cfg.get('user', '')
                     smtp_pass_val = smtp_cfg.get('password', '')
                     if smtp_user_val and smtp_pass_val:
                         smtp_from_secrets = True
-            except Exception:
-                pass
+            except Exception as e:
+                st.warning(f"⚠️ Fehler beim Laden der Secrets: {e}")
 
             if smtp_from_secrets:
-                st.success("🔐 SMTP-Zugangsdaten aus Secrets geladen")
+                st.success(f"🔐 SMTP: {smtp_user_val} @ {smtp_server_val}")
             else:
-                st.info("💡 Tipp: SMTP in `.streamlit/secrets.toml` konfigurieren")
+                st.warning("⚠️ SMTP nicht in Secrets konfiguriert - bitte manuell eingeben")
                 smtp_server_val = st.text_input("SMTP Server", value=smtp_server_val, key="smtp_emp_server")
+                smtp_port_val = st.number_input("Port", value=smtp_port_val, key="smtp_emp_port")
                 smtp_user_val = st.text_input("Email-Adresse", key="smtp_emp_user")
                 smtp_pass_val = st.text_input("Passwort", type="password", key="smtp_emp_pass")
+
+            # Test-Button für SMTP-Verbindung
+            if st.button("🔌 Verbindung testen", key="test_smtp_btn"):
+                if smtp_user_val and smtp_pass_val:
+                    try:
+                        import smtplib
+                        with st.spinner("Teste SMTP-Verbindung..."):
+                            with smtplib.SMTP(smtp_server_val, smtp_port_val, timeout=10) as server:
+                                server.starttls()
+                                server.login(smtp_user_val, smtp_pass_val)
+                        st.success("✅ SMTP-Verbindung erfolgreich!")
+                    except smtplib.SMTPAuthenticationError as e:
+                        st.error(f"❌ Authentifizierung fehlgeschlagen: {e}")
+                    except smtplib.SMTPConnectError as e:
+                        st.error(f"❌ Verbindung fehlgeschlagen: {e}")
+                    except Exception as e:
+                        st.error(f"❌ SMTP-Fehler: {type(e).__name__}: {e}")
+                else:
+                    st.warning("⚠️ Bitte SMTP-Zugangsdaten eingeben")
+
+            st.markdown("---")
 
             # Empfänger-Auswahl mit Vorschlägen aus RENO-Zuordnungen
             st.markdown("**Empfänger auswählen:**")
@@ -1613,76 +1635,107 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
             # Versenden-Button
             if st.button("📤 Jetzt versenden", type="primary", key="empfang_send_btn", use_container_width=True):
                 if not smtp_user_val or not smtp_pass_val:
-                    st.error("❌ SMTP-Zugangsdaten fehlen!")
+                    st.error("❌ SMTP-Zugangsdaten fehlen! Bitte oben eingeben oder in secrets.toml konfigurieren.")
                 elif not any(versand_auswahl.values()) and not extra_emails:
                     st.warning("⚠️ Bitte mindestens einen Empfänger auswählen")
                 else:
-                    try:
-                        sender = EmailSender(
-                            smtp_server=smtp_server_val,
-                            smtp_port=smtp_port_val,
-                            smtp_user=smtp_user_val,
-                            smtp_password=smtp_pass_val
-                        )
+                    # Zeige was versendet wird
+                    total_emails = sum(len(renos) for renos in versand_auswahl.values())
+                    if extra_emails:
+                        total_emails += len([e for e in extra_emails.split(',') if e.strip()]) * len(ergebnisse['zip_dateien'])
 
-                        erfolge = 0
-                        fehler = 0
+                    with st.spinner(f"📤 Versende {total_emails} Email(s)..."):
+                        try:
+                            sender = EmailSender(
+                                smtp_server=smtp_server_val,
+                                smtp_port=int(smtp_port_val),
+                                smtp_user=smtp_user_val,
+                                smtp_password=smtp_pass_val
+                            )
 
-                        # Versand an ausgewählte RENOs
-                        for sb, renos in versand_auswahl.items():
-                            if sb not in ergebnisse['zip_dateien']:
-                                continue
+                            erfolge = 0
+                            fehler = 0
+                            fehler_details = []
 
-                            zip_bytes = ergebnisse['zip_dateien'][sb]
-                            zip_name = f"{sb}"
-                            if scanner_name:
-                                zip_name += f"_{scanner_name}"
-                            if scan_datum:
-                                zip_name += f"_{scan_datum}"
-                            zip_name += ".zip"
+                            # Versand an ausgewählte RENOs
+                            for sb, renos in versand_auswahl.items():
+                                if sb not in ergebnisse['zip_dateien']:
+                                    continue
 
-                            for reno in renos:
-                                success = sender.sende_zip_an_reno(
-                                    reno_email=reno['email'],
-                                    reno_name=reno['name'],
-                                    sachbearbeiter=sb,
-                                    zip_data=zip_bytes,
-                                    anzahl_dokumente=ergebnisse['sachbearbeiter_stats'].get(sb, 0),
-                                    datum=scan_datum,
-                                    zip_filename=zip_name,
-                                    scanner_name=scanner_name
-                                )
-                                if success:
-                                    erfolge += 1
-                                else:
-                                    fehler += 1
+                                zip_bytes = ergebnisse['zip_dateien'][sb]
+                                zip_name = f"{sb}"
+                                if scanner_name:
+                                    zip_name += f"_{scanner_name}"
+                                if scan_datum:
+                                    zip_name += f"_{scan_datum}"
+                                zip_name += ".zip"
 
-                        # Versand an zusätzliche Empfänger
-                        if extra_emails:
-                            for email in [e.strip() for e in extra_emails.split(',') if e.strip()]:
-                                for sb, zip_bytes in ergebnisse['zip_dateien'].items():
-                                    zip_name = f"{sb}_{scanner_name}_{scan_datum}.zip" if scanner_name else f"{sb}_{scan_datum}.zip"
-                                    success = sender.sende_zip_an_reno(
-                                        reno_email=email,
-                                        reno_name=email.split('@')[0],
-                                        sachbearbeiter=sb,
-                                        zip_data=zip_bytes,
-                                        anzahl_dokumente=ergebnisse['sachbearbeiter_stats'].get(sb, 0),
-                                        datum=scan_datum,
-                                        zip_filename=zip_name
-                                    )
-                                    if success:
-                                        erfolge += 1
-                                    else:
+                                for reno in renos:
+                                    try:
+                                        success = sender.sende_zip_an_reno(
+                                            reno_email=reno['email'],
+                                            reno_name=reno['name'],
+                                            sachbearbeiter=sb,
+                                            zip_data=zip_bytes,
+                                            anzahl_dokumente=ergebnisse['sachbearbeiter_stats'].get(sb, 0),
+                                            datum=scan_datum,
+                                            zip_filename=zip_name,
+                                            scanner_name=scanner_name
+                                        )
+                                        if success:
+                                            erfolge += 1
+                                            st.info(f"✓ {sb} → {reno['email']}")
+                                        else:
+                                            fehler += 1
+                                            fehler_details.append(f"{sb} → {reno['email']}: Versand fehlgeschlagen")
+                                    except Exception as e:
                                         fehler += 1
+                                        fehler_details.append(f"{sb} → {reno['email']}: {str(e)}")
 
-                        if fehler == 0:
-                            st.success(f"✅ {erfolge} Emails erfolgreich versendet!")
-                        else:
-                            st.warning(f"⚠️ {erfolge} erfolgreich, {fehler} fehlgeschlagen")
+                            # Versand an zusätzliche Empfänger
+                            if extra_emails:
+                                for email in [e.strip() for e in extra_emails.split(',') if e.strip()]:
+                                    for sb, zip_bytes in ergebnisse['zip_dateien'].items():
+                                        zip_name = f"{sb}_{scanner_name}_{scan_datum}.zip" if scanner_name else f"{sb}_{scan_datum}.zip"
+                                        try:
+                                            success = sender.sende_zip_an_reno(
+                                                reno_email=email,
+                                                reno_name=email.split('@')[0],
+                                                sachbearbeiter=sb,
+                                                zip_data=zip_bytes,
+                                                anzahl_dokumente=ergebnisse['sachbearbeiter_stats'].get(sb, 0),
+                                                datum=scan_datum,
+                                                zip_filename=zip_name
+                                            )
+                                            if success:
+                                                erfolge += 1
+                                                st.info(f"✓ {sb} → {email}")
+                                            else:
+                                                fehler += 1
+                                                fehler_details.append(f"{sb} → {email}: Versand fehlgeschlagen")
+                                        except Exception as e:
+                                            fehler += 1
+                                            fehler_details.append(f"{sb} → {email}: {str(e)}")
 
-                    except Exception as e:
-                        st.error(f"❌ Email-Fehler: {str(e)}")
+                            # Ergebnis anzeigen
+                            if fehler == 0 and erfolge > 0:
+                                st.success(f"✅ {erfolge} Email(s) erfolgreich versendet!")
+                            elif erfolge > 0:
+                                st.warning(f"⚠️ {erfolge} erfolgreich, {fehler} fehlgeschlagen")
+                            else:
+                                st.error(f"❌ Alle {fehler} Emails fehlgeschlagen")
+
+                            # Fehlerdetails anzeigen
+                            if fehler_details:
+                                with st.expander("❌ Fehlerdetails"):
+                                    for detail in fehler_details:
+                                        st.text(detail)
+
+                        except Exception as e:
+                            st.error(f"❌ Email-Fehler: {type(e).__name__}: {str(e)}")
+                            import traceback
+                            with st.expander("🔍 Technische Details"):
+                                st.code(traceback.format_exc())
 
         # Reset-Button
         st.markdown("---")
