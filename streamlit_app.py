@@ -440,10 +440,10 @@ if not st.session_state.current_user:
         st.markdown("#### 🧪 Schnell-Login (Testphase)")
         st.caption("Klicken Sie auf einen Button, um sich direkt einzuloggen:")
 
-        col_q1, col_q2, col_q3 = st.columns(3)
+        col_q1, col_q2, col_q3, col_q4 = st.columns(4)
 
         with col_q1:
-            if st.button("👤 Als Admin anmelden", key="quick_login_admin", type="secondary"):
+            if st.button("👤 Admin", key="quick_login_admin", type="secondary"):
                 user = user_manager.authenticate("admin@rhm-kanzlei.de", "admin123")
                 if user:
                     session_token = user_manager.create_session(user['id'])
@@ -455,7 +455,7 @@ if not st.session_state.current_user:
                     st.error("❌ Admin-Login fehlgeschlagen. Bitte Demo-Benutzer zurücksetzen.")
 
         with col_q2:
-            if st.button("📬 Als Empfang anmelden", key="quick_login_empfang", type="secondary"):
+            if st.button("📬 Empfang", key="quick_login_empfang", type="secondary"):
                 user = user_manager.authenticate("empfang@rhm-kanzlei.de", "empfang123")
                 if user:
                     session_token = user_manager.create_session(user['id'])
@@ -467,8 +467,30 @@ if not st.session_state.current_user:
                     st.error("❌ Empfang-Login fehlgeschlagen. Bitte Demo-Benutzer zurücksetzen.")
 
         with col_q3:
+            # Erstelle Demo-RENO falls nicht vorhanden
+            if st.button("📋 RENO", key="quick_login_reno", type="secondary"):
+                demo_reno = user_manager.get_user_by_email("reno@rhm-kanzlei.de")
+                if not demo_reno:
+                    user_manager.create_user(
+                        email="reno@rhm-kanzlei.de",
+                        password="reno123",
+                        role="Sachbearbeiter",
+                        name="Demo RENO",
+                        kuerzel="RENO"
+                    )
+                user = user_manager.authenticate("reno@rhm-kanzlei.de", "reno123")
+                if user:
+                    session_token = user_manager.create_session(user['id'])
+                    st.session_state.session_token = session_token
+                    st.session_state.current_user = user
+                    st.success(f"✅ Willkommen, {user['name']}!")
+                    st.rerun()
+                else:
+                    st.error("❌ RENO-Login fehlgeschlagen.")
+
+        with col_q4:
             # Erstelle Demo-Rechtsanwalt falls nicht vorhanden
-            if st.button("⚖️ Als Anwalt anmelden", key="quick_login_anwalt", type="secondary"):
+            if st.button("⚖️ Anwalt", key="quick_login_anwalt", type="secondary"):
                 # Prüfe ob Demo-Anwalt existiert
                 demo_anwalt = user_manager.get_user_by_email("anwalt@rhm-kanzlei.de")
                 if not demo_anwalt:
@@ -1872,7 +1894,7 @@ if dashboard_auswahl == "Dashboard Empfang (Einfach)":
 # ============================================================================
 # DASHBOARD RENOS (Erweitert) - Haupt-Upload-Bereich
 # ============================================================================
-if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl == "Dashboard Renos (Erweitert)":
+if dashboard_auswahl == "Dashboard Renos (Erweitert)":
     st.header("📬 Dashboard Renos - Post-Eingang scannen")
 
     col1, col2 = st.columns([1, 1], gap="medium")
