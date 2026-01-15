@@ -595,6 +595,22 @@ RHM Posteingangsverarbeitung
 
 current_user = st.session_state.current_user
 
+# ============================================================================
+# ROLLEN-TRENNUNG: Empfang vs. RENO/Admin
+# ============================================================================
+ist_empfang = current_user['role'] == 'Empfang'
+
+# Für Empfang: Verstecke erweiterte Sidebar-Elemente mit CSS
+if ist_empfang:
+    st.markdown("""
+    <style>
+    /* Verstecke komplexe Sidebar-Elemente für Empfang */
+    [data-testid="stSidebar"] > div:first-child > div:nth-child(n+2):not(:last-child) {
+        display: none !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 # Header mit Benutzer-Info
 col_h1, col_h2, col_h3 = st.columns([3, 1, 1])
 
@@ -1322,7 +1338,18 @@ uploaded_pdfs = None
 uploaded_excel = None
 dashboard_auswahl = None
 
-if current_user['role'] in ['Administrator', 'Empfang']:
+# WICHTIG: Empfang und RENO haben komplett getrennte Bereiche!
+# - Empfang sieht NUR das Empfangs-Dashboard (keine Auswahl)
+# - Admin kann zwischen beiden wählen
+# - Andere Rollen (RENO, Rechtsanwalt) sehen das erweiterte Dashboard
+
+if ist_empfang:
+    # Empfang: Nur Empfangs-Dashboard, keine Auswahl
+    dashboard_auswahl = "Dashboard Empfang (Einfach)"
+    st.info("📬 **Empfangs-Bereich** - Posteingang scannen und verteilen")
+    st.markdown("---")
+elif current_user['role'] == 'Administrator':
+    # Admin: Kann zwischen beiden wählen
     dashboard_auswahl = st.radio(
         "📊 Dashboard auswählen:",
         ["Dashboard Empfang (Einfach)", "Dashboard Renos (Erweitert)"],
@@ -1330,11 +1357,14 @@ if current_user['role'] in ['Administrator', 'Empfang']:
         key="dashboard_auswahl"
     )
     st.markdown("---")
+else:
+    # RENO/Rechtsanwalt: Nur erweitertes Dashboard
+    dashboard_auswahl = "Dashboard Renos (Erweitert)"
 
 # ============================================================================
 # DASHBOARD EMPFANG - Vereinfachtes 3-Schritte-Dashboard
 # ============================================================================
-if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl == "Dashboard Empfang (Einfach)":
+if dashboard_auswahl == "Dashboard Empfang (Einfach)":
 
     # CSS für Ampeln und Schritte
     st.markdown("""
@@ -1376,6 +1406,7 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
         box-shadow: 0 0 10px rgba(0,0,0,0.3);
     }
     .ampel-rot { background: #dc3545; box-shadow: 0 0 15px #dc3545; }
+    .ampel-gelb { background: #ffc107; box-shadow: 0 0 15px #ffc107; }
     .ampel-orange { background: #fd7e14; box-shadow: 0 0 15px #fd7e14; }
     .ampel-gruen { background: #28a745; box-shadow: 0 0 15px #28a745; }
     .fertig-banner {
@@ -1439,23 +1470,23 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
             "Aktenregister hochladen (.xlsx)" if not aktenregister_vorhanden else "Neues Register hochladen (optional)",
             type=["xlsx"],
             key="empfang_step1_excel",
-            help="Excel-Datei mit Blatt 'akten'"
+            help="Excel-Datei mit Blatt 'akten' - wird automatisch gespeichert"
         )
 
+        # AUTOMATISCH SPEICHERN wenn Datei hochgeladen wird
         if empfang_excel:
-            if st.button("📊 Register speichern", key="save_register_btn"):
-                try:
-                    import pandas as pd
-                    new_df = pd.read_excel(
-                        BytesIO(empfang_excel.read()),
-                        sheet_name='akten',
-                        header=1
-                    )
-                    storage.save_aktenregister(new_df, merge=storage.has_aktenregister())
-                    st.success("✅ Aktenregister gespeichert!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Fehler: {e}")
+            try:
+                import pandas as pd
+                new_df = pd.read_excel(
+                    BytesIO(empfang_excel.read()),
+                    sheet_name='akten',
+                    header=1
+                )
+                storage.save_aktenregister(new_df, merge=storage.has_aktenregister())
+                st.success("✅ Aktenregister automatisch gespeichert!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Fehler beim Speichern: {e}")
 
     st.markdown("---")
 
@@ -1463,29 +1494,39 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
     # SCHRITT 2: POSTEINGANG UPLOAD & VERARBEITUNG
     # =========================================================================
     # Status ermitteln
+    # Ampel-Farben: Rot=keine Daten, Gelb=hochgeladen, Orange=Verarbeitung, Grün=Fertig
     empfang_pdfs = st.session_state.get('empfang_uploaded_files', [])
     verarbeitung_done = st.session_state.get('empfang_simple_done', False)
+    verarbeitung_laeuft = st.session_state.get('empfang_processing', False)
 
     if verarbeitung_done:
         ampel_2 = "ampel-gruen"
         step_bg_2 = "#d4edda"
-        status_text = "Verarbeitung abgeschlossen"
-    elif empfang_pdfs:
+        border_color_2 = "#28a745"
+        status_text = "✅ Verarbeitung abgeschlossen"
+    elif verarbeitung_laeuft:
         ampel_2 = "ampel-orange"
+        step_bg_2 = "#ffe5cc"
+        border_color_2 = "#fd7e14"
+        status_text = "⏳ Verarbeitung läuft..."
+    elif empfang_pdfs:
+        ampel_2 = "ampel-gelb"
         step_bg_2 = "#fff3cd"
-        status_text = f"{len(empfang_pdfs)} Datei(en) bereit"
+        border_color_2 = "#ffc107"
+        status_text = f"📄 {len(empfang_pdfs)} Datei(en) bereit"
     else:
         ampel_2 = "ampel-rot"
         step_bg_2 = "#f8d7da"
+        border_color_2 = "#dc3545"
         status_text = "Keine Dateien"
 
     st.markdown(f"""
-    <div class="step-container" style="background: {step_bg_2}; border-color: {'#28a745' if verarbeitung_done else '#fd7e14' if empfang_pdfs else '#dc3545'};">
+    <div class="step-container" style="background: {step_bg_2}; border-color: {border_color_2};">
         <div class="step-header">
-            <div class="step-number" style="background: {'#28a745' if verarbeitung_done else '#fd7e14' if empfang_pdfs else '#dc3545'};">2</div>
+            <div class="step-number" style="background: {border_color_2};">2</div>
             <span class="step-title">Posteingang verarbeiten</span>
             <span class="ampel {ampel_2}"></span>
-            <span style="margin-left: 15px; color: #666;">({status_text})</span>
+            <span style="margin-left: 15px; color: #666;">{status_text}</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -1737,29 +1778,11 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
             except Exception as e:
                 st.warning(f"⚠️ Secrets-Fehler: {e}")
 
+            # Für Empfang: Vereinfachte Ansicht ohne Test/Konfiguration
             if smtp_from_secrets:
-                st.success(f"🔐 {smtp_user_val}")
+                st.success("✅ Email-Versand konfiguriert")
             else:
-                st.warning("⚠️ SMTP in secrets.toml konfigurieren")
-                with st.expander("SMTP manuell eingeben"):
-                    smtp_server_val = st.text_input("Server", value=smtp_server_val, key="smtp_s")
-                    smtp_port_val = st.number_input("Port", value=smtp_port_val, key="smtp_p")
-                    smtp_user_val = st.text_input("User", key="smtp_u")
-                    smtp_pass_val = st.text_input("Passwort", type="password", key="smtp_pw")
-
-            # Test-Button
-            if st.button("🔌 Verbindung testen", key="test_smtp"):
-                if smtp_user_val and smtp_pass_val:
-                    try:
-                        import smtplib
-                        with smtplib.SMTP(smtp_server_val, smtp_port_val, timeout=10) as server:
-                            server.starttls()
-                            server.login(smtp_user_val, smtp_pass_val)
-                        st.success("✅ Verbindung OK!")
-                    except Exception as e:
-                        st.error(f"❌ {e}")
-
-            st.markdown("---")
+                st.error("❌ SMTP nicht konfiguriert - Admin kontaktieren")
 
             # Empfänger-Auswahl
             st.markdown("**Empfänger pro Sachbearbeiter:**")
