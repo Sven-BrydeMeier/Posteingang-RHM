@@ -600,17 +600,6 @@ current_user = st.session_state.current_user
 # ============================================================================
 ist_empfang = current_user['role'] == 'Empfang'
 
-# Für Empfang: Verstecke erweiterte Sidebar-Elemente mit CSS
-if ist_empfang:
-    st.markdown("""
-    <style>
-    /* Verstecke komplexe Sidebar-Elemente für Empfang */
-    [data-testid="stSidebar"] > div:first-child > div:nth-child(n+2):not(:last-child) {
-        display: none !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
 # Header mit Benutzer-Info
 col_h1, col_h2, col_h3 = st.columns([3, 1, 1])
 
@@ -747,584 +736,604 @@ if 'api_keys' not in st.session_state:
 if 'api_provider' not in st.session_state:
     st.session_state.api_provider = 'OpenAI (ChatGPT)'
 
-# Sidebar für API-Konfiguration
-st.sidebar.header("⚙️ Einstellungen")
+# ============================================================================
+# SIDEBAR - Unterschiedlich für Empfang vs. RENO/Admin
+# ============================================================================
 
-# API-Anbieter-Auswahl
-st.sidebar.subheader("🤖 KI-Anbieter")
-api_provider = st.sidebar.selectbox(
-    "Wählen Sie den KI-Dienst:",
-    options=["OpenAI (ChatGPT)", "Claude (Anthropic)", "Gemini (Google)"],
-    index=0,  # OpenAI als Standard
-    help="Wählen Sie den KI-Dienst für die Dokumentenanalyse"
-)
-st.session_state.api_provider = api_provider
-
-# API-Key Eingabe (mit persistenter Speicherung)
+# API-Key für Empfang im Hintergrund laden (braucht er für Verarbeitung)
+api_provider = st.session_state.api_provider
 provider_key_map = {
     "OpenAI (ChatGPT)": "openai",
     "Claude (Anthropic)": "claude",
     "Gemini (Google)": "gemini"
 }
 current_provider_key = provider_key_map[api_provider]
-
-# Zeige Status: Key-Quelle anzeigen
-has_saved_key = storage.has_api_key(current_provider_key)
-stored_key = st.session_state.api_keys.get(current_provider_key, '')
-
-# Prüfe ob Key aus Streamlit Secrets kommt
-key_from_secrets = False
-try:
-    secret_key_names = {
-        'openai': ['openai', 'OPENAI_API_KEY'],
-        'claude': ['claude', 'ANTHROPIC_API_KEY'],
-        'gemini': ['gemini', 'GOOGLE_API_KEY']
-    }
-
-    for secret_name in secret_key_names.get(current_provider_key, []):
-        if secret_name in st.secrets:
-            if isinstance(st.secrets[secret_name], dict):
-                if stored_key == st.secrets[secret_name].get('api_key', ''):
-                    key_from_secrets = True
-                    break
-            elif stored_key == st.secrets[secret_name]:
-                key_from_secrets = True
-                break
-except:
-    pass
-
-# 🟢 GRÜNES LÄMPCHEN: Zeige prominente API-Key-Status-Anzeige ganz oben
-st.sidebar.markdown("---")
-if key_from_secrets and stored_key:
-    # GRÜNES LÄMPCHEN: Key aus Streamlit Secrets
-    st.sidebar.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #00c853 0%, #00e676 100%);
-            padding: 20px;
-            border-radius: 15px;
-            text-align: center;
-            box-shadow: 0 4px 15px rgba(0,200,83,0.4);
-            margin-bottom: 20px;
-        ">
-            <div style="font-size: 48px; margin-bottom: 10px;">🟢</div>
-            <div style="color: white; font-weight: bold; font-size: 18px; margin-bottom: 5px;">
-                API KEY AKTIV
-            </div>
-            <div style="color: #e8f5e9; font-size: 14px; margin-bottom: 10px;">
-                🔐 Streamlit Cloud Secrets
-            </div>
-            <div style="background: rgba(255,255,255,0.2); padding: 8px; border-radius: 8px; font-family: monospace; font-size: 12px; color: white;">
-                """ + (stored_key[:7] + "..." + stored_key[-4:] if len(stored_key) > 15 else "***") + """
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-elif stored_key:
-    # GELBES LÄMPCHEN: Key gespeichert
-    st.sidebar.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #ffa726 0%, #ffb74d 100%);
-            padding: 20px;
-            border-radius: 15px;
-            text-align: center;
-            box-shadow: 0 4px 15px rgba(255,167,38,0.4);
-            margin-bottom: 20px;
-        ">
-            <div style="font-size: 48px; margin-bottom: 10px;">🟡</div>
-            <div style="color: white; font-weight: bold; font-size: 18px; margin-bottom: 5px;">
-                API KEY GESPEICHERT
-            </div>
-            <div style="color: #fff3e0; font-size: 14px;">
-                💾 Lokal gespeichert
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-else:
-    # ROTES LÄMPCHEN: Kein Key
-    st.sidebar.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #ef5350 0%, #e57373 100%);
-            padding: 20px;
-            border-radius: 15px;
-            text-align: center;
-            box-shadow: 0 4px 15px rgba(239,83,80,0.4);
-            margin-bottom: 20px;
-        ">
-            <div style="font-size: 48px; margin-bottom: 10px;">🔴</div>
-            <div style="color: white; font-weight: bold; font-size: 18px; margin-bottom: 5px;">
-                KEIN API KEY
-            </div>
-            <div style="color: #ffebee; font-size: 14px;">
-                ⚠️ Bitte Key eingeben
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-st.sidebar.markdown("---")
-
-# Zeige Status-Meldung und API-Key Eingabefeld
-if key_from_secrets:
-    # Key aus Streamlit Secrets - Zeige prominente Meldung
-    st.sidebar.success(f"✅ **{api_provider} Key aktiv**")
-    st.sidebar.info(f"🔐 **Quelle:** Streamlit Secrets (streamlit.io)")
-
-    # Zeige maskierten Key (nur zur Bestätigung)
-    masked_key = stored_key[:7] + "..." + stored_key[-4:] if len(stored_key) > 15 else "***"
-    st.sidebar.code(masked_key)
-
-    # Eingabefeld deaktiviert mit Hinweis
-    api_key_input = st.sidebar.text_input(
-        f"{api_provider} API Key (schreibgeschützt)",
-        value="Verwendet Key aus Streamlit Secrets",
-        type="default",
-        disabled=True,
-        help="Key wird aus Streamlit Cloud Secrets geladen und kann hier nicht geändert werden",
-        key=f"api_key_input_{current_provider_key}_disabled"
-    )
-
-elif has_saved_key:
-    # Key aus persistenter Speicherung
-    timestamp = storage.get_api_key_timestamp(current_provider_key)
-    if timestamp:
-        from datetime import datetime
-        dt = datetime.fromisoformat(timestamp)
-        formatted = dt.strftime('%d.%m.%Y %H:%M')
-        st.sidebar.success(f"💾 Gespeicherter {api_provider} Key gefunden\n\n*Zuletzt aktualisiert: {formatted}*")
-    else:
-        st.sidebar.success(f"💾 Gespeicherter {api_provider} Key gefunden")
-
-    # Normales Eingabefeld
-    stored_key = st.session_state.api_keys.get(current_provider_key, '')
-    api_key_input = st.sidebar.text_input(
-        f"{api_provider} API Key (neu eingeben zum Ändern)",
-        value=stored_key,
-        type="password",
-        help=f"Neuer Key überschreibt gespeicherten Key",
-        key=f"api_key_input_{current_provider_key}"
-    )
-else:
-    # Kein Key vorhanden - Bitte um Eingabe
-    st.sidebar.warning(f"⚠️ Bitte {api_provider} API Key eingeben")
-
-    # Normales Eingabefeld
-    stored_key = st.session_state.api_keys.get(current_provider_key, '')
-    api_key_input = st.sidebar.text_input(
-        f"{api_provider} API Key",
-        value=stored_key,
-        type="password",
-        help=f"Geben Sie Ihren {api_provider} API Key ein",
-        key=f"api_key_input_{current_provider_key}"
-    )
-
-# Speichere Key in Session State und persistentem Storage
-if api_key_input and api_key_input != stored_key:
-    st.session_state.api_keys[current_provider_key] = api_key_input
-    # Speichere persistent (verschlüsselt)
-    storage.save_api_key(current_provider_key, api_key_input)
-    st.sidebar.success("✅ API-Key gespeichert!")
-
-# Lösch-Button für gespeicherten Key
-if has_saved_key:
-    if st.sidebar.button(f"🗑️ {api_provider} Key löschen", key=f"delete_{current_provider_key}"):
-        storage.delete_api_key(current_provider_key)
-        st.session_state.api_keys[current_provider_key] = ''
-        st.rerun()
-
-# Hole aktuellen Key
 current_api_key = st.session_state.api_keys.get(current_provider_key, '')
 
-# API-Key Verbindungstest
-if current_api_key:
-    try:
-        if api_provider == "OpenAI (ChatGPT)":
-            from openai import OpenAI
-            test_client = OpenAI(api_key=current_api_key)
-            test_client.models.list()
-            st.sidebar.markdown("🟢 **Verbindung erfolgreich**")
-
-        elif api_provider == "Claude (Anthropic)":
-            import anthropic
-            test_client = anthropic.Anthropic(api_key=current_api_key)
-            # Test mit einfachem API-Aufruf
-            test_client.models.list()
-            st.sidebar.markdown("🟢 **Verbindung erfolgreich**")
-
-        elif api_provider == "Gemini (Google)":
-            import google.generativeai as genai
-            genai.configure(api_key=current_api_key)
-            # Test: Liste verfügbare Modelle
-            list(genai.list_models())
-            st.sidebar.markdown("🟢 **Verbindung erfolgreich**")
-
-    except Exception as e:
-        error_msg = str(e)
-        if "authentication" in error_msg.lower() or "api key" in error_msg.lower() or "api_key" in error_msg.lower():
-            st.sidebar.markdown("🔴 **Ungültiger API-Key**")
-        else:
-            st.sidebar.markdown(f"🟡 **Verbindungsfehler**: {error_msg[:100]}")
-else:
-    st.sidebar.markdown("⚪ **Kein API-Key eingegeben**")
-
-st.sidebar.markdown("---")
-
-# Dokumententrennung (fest: nur "Trennseite"-Text)
-st.sidebar.subheader("📑 Dokumententrennung")
-st.sidebar.info("Dokumente werden durch Seiten mit dem Text **'Trennseite'** getrennt.")
-
-st.sidebar.markdown("---")
-st.sidebar.info("""
-**Sachbearbeiter:**
-- SQ: Rechtsanwalt und Notar Sven-Bryde Meier
-- TS: Rechtsanwältin Tamara Meyer
-- M/MQ: Rechtsanwältin Ann-Kathrin Marquardsen
-- FÜ: Rechtsanwalt Dr. Fürsen
-- CV: Rechtsanwalt Christian Ostertun
-""")
-
-# Papierkorb-Einstellungen
-st.sidebar.markdown("---")
-st.sidebar.subheader("🗑️ Papierkorb")
-
-# Statistiken
-trash_stats = trash_manager.get_statistics()
-if trash_stats['total_items'] > 0:
-    st.sidebar.warning(f"📦 {trash_stats['total_items']} Dokument(e) im Papierkorb")
-
-    # Zeige abgelaufene Dokumente
-    if trash_stats['expired_items'] > 0:
-        st.sidebar.error(f"⚠️ {trash_stats['expired_items']} abgelaufen")
-else:
-    st.sidebar.success("✅ Papierkorb leer")
-
-# Aufbewahrungszeit einstellen
-with st.sidebar.expander("⚙️ Einstellungen"):
-    current_hours = trash_manager.get_retention_hours()
-
-    retention_hours = st.number_input(
-        "Aufbewahrungszeit (Stunden):",
-        min_value=1,
-        max_value=720,  # 30 Tage
-        value=current_hours,
-        step=1,
-        help="Dokumente werden nach dieser Zeit automatisch gelöscht"
-    )
-
-    if retention_hours != current_hours:
-        trash_manager.set_retention_hours(retention_hours)
-        st.success(f"✅ Aufbewahrungszeit auf {retention_hours}h gesetzt")
-
-    # Schnell-Auswahl
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("24h", width="stretch"):
-            trash_manager.set_retention_hours(24)
-            st.rerun()
-    with col2:
-        if st.button("48h", width="stretch"):
-            trash_manager.set_retention_hours(48)
-            st.rerun()
-
-    col3, col4 = st.columns(2)
-    with col3:
-        if st.button("7 Tage", width="stretch"):
-            trash_manager.set_retention_hours(168)
-            st.rerun()
-    with col4:
-        if st.button("30 Tage", width="stretch"):
-            trash_manager.set_retention_hours(720)
-            st.rerun()
-
-# Hot Folder Status
-st.sidebar.markdown("---")
-st.sidebar.subheader("📁 Hot Folder")
-if st.session_state.hot_folder_watcher and st.session_state.hot_folder_watcher.is_running():
-    st.sidebar.success("✅ Aktiv")
-    stats = st.session_state.hot_folder_watcher.get_statistics()
-    st.sidebar.metric("Verarbeitet", stats['processed'])
-else:
-    st.sidebar.info("⏸️ Nicht aktiv")
-
-# Auto-Ablage Status
-st.sidebar.markdown("---")
-st.sidebar.subheader("☁️ Auto-Ablage")
-auto_storage = st.session_state.auto_file_storage
-if auto_storage.is_enabled():
-    st.sidebar.success("✅ Aktiviert")
-    storage_stats = auto_storage.get_statistics()
-    st.sidebar.metric("Gespeichert", storage_stats['total_stored'])
-else:
-    st.sidebar.info("⏸️ Deaktiviert")
-
-# Backup Status
-st.sidebar.markdown("---")
-st.sidebar.subheader("💾 Backup")
-backup_mgr = st.session_state.backup_manager
-backup_stats = backup_mgr.get_statistics()
-if backup_stats['enabled']:
-    st.sidebar.success(f"✅ {backup_stats['frequency']}")
-    st.sidebar.metric("Backups", backup_stats['total_backups'])
-else:
-    st.sidebar.info("⏸️ Deaktiviert")
-
-# Wiedervorlagen
-st.sidebar.markdown("---")
-st.sidebar.subheader("📌 Wiedervorlagen")
-wv_system = st.session_state.wiedervorlage_system
-wv_stats = wv_system.get_statistics()
-if wv_stats['aktiv'] > 0:
-    st.sidebar.warning(f"⚠️ {wv_stats['aktiv']} aktiv")
-    if wv_stats['ueberfaellig'] > 0:
-        st.sidebar.error(f"🔴 {wv_stats['ueberfaellig']} überfällig")
-    if wv_stats['heute'] > 0:
-        st.sidebar.warning(f"🟠 {wv_stats['heute']} heute fällig")
-else:
-    st.sidebar.success("✅ Keine Wiedervorlagen")
-
-# Admin/Empfang-Bereich
-if current_user['role'] in ['Administrator', 'Empfang']:
+# EMPFANG: Minimale Sidebar
+if ist_empfang:
+    st.sidebar.markdown("## 📬 Empfang")
+    st.sidebar.info(f"**{current_user['name']}**")
     st.sidebar.markdown("---")
-    st.sidebar.subheader("👥 Benutzerverwaltung")
+    if current_api_key:
+        st.sidebar.success("✅ System bereit")
+    else:
+        st.sidebar.error("⚠️ System nicht konfiguriert")
+    # Keine weiteren Sidebar-Elemente für Empfang
 
-    with st.sidebar.expander("➕ Benutzer einladen"):
-        inv_email = st.text_input("Email:", key="sidebar_inv_email")
-        inv_role = st.selectbox("Rolle:", [
-            "Sachbearbeiter",
-            "Rechtsanwalt",
-            "Empfang",
-            "Administrator"
-        ])
-        inv_name = st.text_input("Name:", key="sidebar_inv_name")
-        inv_kuerzel = st.text_input("Kürzel (z.B. SQ):", key="sidebar_inv_kuerzel")
+# RENO/ADMIN: Vollständige Sidebar
+else:
+    # Sidebar für API-Konfiguration
+    st.sidebar.header("⚙️ Einstellungen")
 
-        if st.button("📧 Einladung versenden", key="sidebar_send_inv"):
-            if inv_email and inv_name and inv_kuerzel:
-                token = user_manager.create_invitation(
-                    email=inv_email,
-                    role=inv_role,
-                    created_by=current_user['email'],
-                    name=inv_name,
-                    kuerzel=inv_kuerzel
-                )
+    # API-Anbieter-Auswahl
+    st.sidebar.subheader("🤖 KI-Anbieter")
+    api_provider = st.sidebar.selectbox(
+        "Wählen Sie den KI-Dienst:",
+        options=["OpenAI (ChatGPT)", "Claude (Anthropic)", "Gemini (Google)"],
+        index=0,  # OpenAI als Standard
+        help="Wählen Sie den KI-Dienst für die Dokumentenanalyse"
+    )
+    st.session_state.api_provider = api_provider
+    current_provider_key = provider_key_map[api_provider]
 
-                invitation_link = f"?invitation={token}"
-                st.success("✅ Einladung erstellt!")
-                st.code(f"Token: {token[:32]}...")
-                st.caption("Link an Benutzer senden")
-            else:
-                st.warning("⚠️ Alle Felder ausfüllen")
+    # Zeige Status: Key-Quelle anzeigen
+    has_saved_key = storage.has_api_key(current_provider_key)
+    stored_key = st.session_state.api_keys.get(current_provider_key, '')
 
-    # Kürzel-Verwaltung
-    with st.sidebar.expander("🏷️ Kürzel verwalten"):
-        st.caption("Kürzel für neue Mitarbeiter, Rechtsanwälte oder Notare hinzufügen")
+    # Prüfe ob Key aus Streamlit Secrets kommt
+    key_from_secrets = False
+    try:
+        secret_key_names = {
+            'openai': ['openai', 'OPENAI_API_KEY'],
+            'claude': ['claude', 'ANTHROPIC_API_KEY'],
+            'gemini': ['gemini', 'GOOGLE_API_KEY']
+        }
 
-        # Bestehende Kürzel anzeigen
-        custom_kuerzel = storage.get_all_kuerzel_with_names()
+        for secret_name in secret_key_names.get(current_provider_key, []):
+            if secret_name in st.secrets:
+                if isinstance(st.secrets[secret_name], dict):
+                    if stored_key == st.secrets[secret_name].get('api_key', ''):
+                        key_from_secrets = True
+                        break
+                elif stored_key == st.secrets[secret_name]:
+                    key_from_secrets = True
+                    break
+    except:
+        pass
 
-        if custom_kuerzel:
-            st.markdown("**Gespeicherte Kürzel:**")
-            for kuerzel, data in custom_kuerzel.items():
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.text(f"{kuerzel} → {data['name']} ({data.get('category', 'Mitarbeiter')})")
-                with col2:
-                    if st.button("❌", key=f"del_kuerzel_{kuerzel}", help=f"{kuerzel} löschen"):
-                        if storage.delete_kuerzel(kuerzel):
-                            st.success(f"✅ {kuerzel} gelöscht!")
-                            st.rerun()
-                        else:
-                            st.error("❌ Fehler beim Löschen")
+    # 🟢 GRÜNES LÄMPCHEN: Zeige prominente API-Key-Status-Anzeige ganz oben
+    st.sidebar.markdown("---")
+    if key_from_secrets and stored_key:
+        # GRÜNES LÄMPCHEN: Key aus Streamlit Secrets
+        st.sidebar.markdown("""
+            <div style="
+                background: linear-gradient(135deg, #00c853 0%, #00e676 100%);
+                padding: 20px;
+                border-radius: 15px;
+                text-align: center;
+                box-shadow: 0 4px 15px rgba(0,200,83,0.4);
+                margin-bottom: 20px;
+            ">
+                <div style="font-size: 48px; margin-bottom: 10px;">🟢</div>
+                <div style="color: white; font-weight: bold; font-size: 18px; margin-bottom: 5px;">
+                    API KEY AKTIV
+                </div>
+                <div style="color: #e8f5e9; font-size: 14px; margin-bottom: 10px;">
+                    🔐 Streamlit Cloud Secrets
+                </div>
+                <div style="background: rgba(255,255,255,0.2); padding: 8px; border-radius: 8px; font-family: monospace; font-size: 12px; color: white;">
+                    """ + (stored_key[:7] + "..." + stored_key[-4:] if len(stored_key) > 15 else "***") + """
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+    elif stored_key:
+        # GELBES LÄMPCHEN: Key gespeichert
+        st.sidebar.markdown("""
+            <div style="
+                background: linear-gradient(135deg, #ffa726 0%, #ffb74d 100%);
+                padding: 20px;
+                border-radius: 15px;
+                text-align: center;
+                box-shadow: 0 4px 15px rgba(255,167,38,0.4);
+                margin-bottom: 20px;
+            ">
+                <div style="font-size: 48px; margin-bottom: 10px;">🟡</div>
+                <div style="color: white; font-weight: bold; font-size: 18px; margin-bottom: 5px;">
+                    API KEY GESPEICHERT
+                </div>
+                <div style="color: #fff3e0; font-size: 14px;">
+                    💾 Lokal gespeichert
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+    else:
+        # ROTES LÄMPCHEN: Kein Key
+        st.sidebar.markdown("""
+            <div style="
+                background: linear-gradient(135deg, #ef5350 0%, #e57373 100%);
+                padding: 20px;
+                border-radius: 15px;
+                text-align: center;
+                box-shadow: 0 4px 15px rgba(239,83,80,0.4);
+                margin-bottom: 20px;
+            ">
+                <div style="font-size: 48px; margin-bottom: 10px;">🔴</div>
+                <div style="color: white; font-weight: bold; font-size: 18px; margin-bottom: 5px;">
+                    KEIN API KEY
+                </div>
+                <div style="color: #ffebee; font-size: 14px;">
+                    ⚠️ Bitte Key eingeben
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+    st.sidebar.markdown("---")
 
-        st.markdown("---")
-        st.markdown("**Neues Kürzel hinzufügen:**")
+    # Zeige Status-Meldung und API-Key Eingabefeld
+    if key_from_secrets:
+        # Key aus Streamlit Secrets - Zeige prominente Meldung
+        st.sidebar.success(f"✅ **{api_provider} Key aktiv**")
+        st.sidebar.info(f"🔐 **Quelle:** Streamlit Secrets (streamlit.io)")
 
-        new_kuerzel = st.text_input("Kürzel (z.B. GO):", key="sidebar_new_kuerzel", max_chars=3)
-        new_name = st.text_input("Name:", key="sidebar_new_name")
-        new_category = st.selectbox("Kategorie:", [
-            "Mitarbeiter",
-            "Rechtsanwalt",
-            "Rechtsanwältin",
-            "Notar",
-            "Notarin"
-        ], key="sidebar_new_category")
+        # Zeige maskierten Key (nur zur Bestätigung)
+        masked_key = stored_key[:7] + "..." + stored_key[-4:] if len(stored_key) > 15 else "***"
+        st.sidebar.code(masked_key)
 
-        if st.button("➕ Kürzel hinzufügen", key="sidebar_add_kuerzel"):
-            if new_kuerzel and new_name:
-                if storage.add_kuerzel(new_kuerzel.upper().strip(), new_name.strip(), new_category):
-                    st.success(f"✅ Kürzel {new_kuerzel.upper()} hinzugefügt!")
-                    st.info("ℹ️ Das neue Kürzel wird beim nächsten Upload verwendet.")
-                    st.rerun()
-                else:
-                    st.error("❌ Fehler beim Hinzufügen (max. 3 Zeichen)")
-            else:
-                st.warning("⚠️ Beide Felder ausfüllen")
-
-    # RENO-Zuordnungen verwalten (Empfänger für Email-Versand)
-    with st.sidebar.expander("📧 Email-Empfänger verwalten"):
-        st.caption("Zuordnung von Empfängern (RENOs) zu Sachbearbeitern für den Email-Versand")
-
-        reno_zuordnungen = storage.get_reno_zuordnungen()
-
-        # Sachbearbeiter auswählen
-        sb_liste = list(reno_zuordnungen.keys())
-        if 'nicht-zugeordnet' not in sb_liste:
-            sb_liste.append('nicht-zugeordnet')
-
-        selected_sb = st.selectbox(
-            "Sachbearbeiter:",
-            options=sb_liste,
-            key="reno_admin_sb"
+        # Eingabefeld deaktiviert mit Hinweis
+        api_key_input = st.sidebar.text_input(
+            f"{api_provider} API Key (schreibgeschützt)",
+            value="Verwendet Key aus Streamlit Secrets",
+            type="default",
+            disabled=True,
+            help="Key wird aus Streamlit Cloud Secrets geladen und kann hier nicht geändert werden",
+            key=f"api_key_input_{current_provider_key}_disabled"
         )
 
-        # Aktuelle Empfänger anzeigen
-        if selected_sb and selected_sb in reno_zuordnungen:
-            st.markdown(f"**Empfänger für {selected_sb}:**")
-            for reno in reno_zuordnungen[selected_sb]:
-                col_r1, col_r2 = st.columns([3, 1])
-                with col_r1:
-                    st.text(f"{reno['name']}\n{reno['email']}")
-                with col_r2:
-                    if st.button("❌", key=f"del_reno_{selected_sb}_{reno['email']}", help="Entfernen"):
-                        if storage.remove_reno_von_sachbearbeiter(selected_sb, reno['email']):
-                            st.success("✅ Entfernt!")
-                            st.rerun()
+    elif has_saved_key:
+        # Key aus persistenter Speicherung
+        timestamp = storage.get_api_key_timestamp(current_provider_key)
+        if timestamp:
+            from datetime import datetime
+            dt = datetime.fromisoformat(timestamp)
+            formatted = dt.strftime('%d.%m.%Y %H:%M')
+            st.sidebar.success(f"💾 Gespeicherter {api_provider} Key gefunden\n\n*Zuletzt aktualisiert: {formatted}*")
+        else:
+            st.sidebar.success(f"💾 Gespeicherter {api_provider} Key gefunden")
 
-        st.markdown("---")
-        st.markdown("**Neuen Empfänger hinzufügen:**")
+        # Normales Eingabefeld
+        stored_key = st.session_state.api_keys.get(current_provider_key, '')
+        api_key_input = st.sidebar.text_input(
+            f"{api_provider} API Key (neu eingeben zum Ändern)",
+            value=stored_key,
+            type="password",
+            help=f"Neuer Key überschreibt gespeicherten Key",
+            key=f"api_key_input_{current_provider_key}"
+        )
+    else:
+        # Kein Key vorhanden - Bitte um Eingabe
+        st.sidebar.warning(f"⚠️ Bitte {api_provider} API Key eingeben")
 
-        new_reno_name = st.text_input("Name:", key="new_reno_name", placeholder="Max Mustermann")
-        new_reno_email = st.text_input("Email:", key="new_reno_email", placeholder="max@ra-rhm.de")
+        # Normales Eingabefeld
+        stored_key = st.session_state.api_keys.get(current_provider_key, '')
+        api_key_input = st.sidebar.text_input(
+            f"{api_provider} API Key",
+            value=stored_key,
+            type="password",
+            help=f"Geben Sie Ihren {api_provider} API Key ein",
+            key=f"api_key_input_{current_provider_key}"
+        )
 
-        if st.button("➕ Empfänger hinzufügen", key="add_reno_btn"):
-            if new_reno_name and new_reno_email and selected_sb:
-                if storage.add_reno_zu_sachbearbeiter(selected_sb, new_reno_name.strip(), new_reno_email.strip()):
-                    st.success(f"✅ {new_reno_name} zu {selected_sb} hinzugefügt!")
-                    st.rerun()
-                else:
-                    st.warning("⚠️ Email bereits vorhanden")
-            else:
-                st.warning("⚠️ Alle Felder ausfüllen")
+    # Speichere Key in Session State und persistentem Storage
+    if api_key_input and api_key_input != stored_key:
+        st.session_state.api_keys[current_provider_key] = api_key_input
+        # Speichere persistent (verschlüsselt)
+        storage.save_api_key(current_provider_key, api_key_input)
+        st.sidebar.success("✅ API-Key gespeichert!")
 
-        # Neuen Sachbearbeiter für Zuordnungen
-        st.markdown("---")
-        new_sb_for_reno = st.text_input("Neuer Sachbearbeiter (Kürzel):", key="new_sb_reno", max_chars=3)
-        if st.button("➕ Sachbearbeiter anlegen", key="add_sb_reno"):
-            if new_sb_for_reno:
-                sb_upper = new_sb_for_reno.upper().strip()
-                if sb_upper not in reno_zuordnungen:
-                    reno_zuordnungen[sb_upper] = []
-                    storage.save_reno_zuordnungen(reno_zuordnungen)
-                    st.success(f"✅ {sb_upper} angelegt!")
-                    st.rerun()
-                else:
-                    st.info(f"ℹ️ {sb_upper} existiert bereits")
-
-    # Benutzer-Übersicht
-    all_users = user_manager.get_all_users()
-    active_users = [u for u in all_users if u.get('active', True)]
-    st.sidebar.metric("Aktive Benutzer", len(active_users))
-
-# ============================================================================
-# PERSONALISIERTES DASHBOARD
-# ============================================================================
-
-st.header(f"👋 Willkommen, {current_user['name']}")
-
-# Dashboard-Daten holen
-dashboard_data = user_dash.get_dashboard_data(current_user, storage)
-
-# KPIs
-col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
-
-with col_kpi1:
-    st.metric("Meine Dokumente", dashboard_data['total'])
-
-with col_kpi2:
-    new_count = dashboard_data['new_count']
-    st.metric("Neu (24h)", new_count)
-    if new_count > 0:
-        # Sende Benachrichtigung wenn noch nicht gesehen
-        if dashboard_data['unseen_count'] > 0:
-            browser_notif.send_notification_to_user(
-                current_user['id'],
-                f"📬 Neuer Posteingang",
-                f"{new_count} neue Dokument(e) für Sie!"
-            )
-
-with col_kpi3:
-    st.metric("Ungesehen", dashboard_data['unseen_count'])
-
-with col_kpi4:
-    critical = dashboard_data['statistics']['by_priority'].get('CRITICAL', 0)
-    st.metric("Kritische Fristen", critical)
-
-st.markdown("---")
-
-# Neue/Ungesehene Dokumente
-if dashboard_data['unseen_count'] > 0:
-    with st.expander(f"📬 {dashboard_data['unseen_count']} neue Dokument(e)", expanded=True):
-        for doc in dashboard_data['unseen_documents'][:5]:
-            col_a, col_b, col_c = st.columns([3, 1, 1])
-
-            with col_a:
-                st.write(f"**{doc.get('dateiname', 'Unbekannt')}**")
-                st.caption(f"AZ: {doc.get('aktenzeichen_info', {}).get('internes_az', '-')}")
-
-            with col_b:
-                priority = doc.get('analyse', {}).get('deadline_info', {}).get('priority', 'NORMAL')
-                st.caption(f"Priorität: {priority}")
-
-            with col_c:
-                if st.button("📥 Details", key=f"view_{doc.get('dateiname')}"):
-                    # Zeige Details des Dokuments
-                    with st.expander(f"📄 Details: {doc.get('dateiname')}", expanded=True):
-                        # Basis-Informationen
-                        st.markdown("### 📋 Dokumenten-Information")
-                        col1, col2 = st.columns(2)
-
-                        with col1:
-                            st.write(f"**Dateiname:** {doc.get('dateiname', '-')}")
-                            st.write(f"**Aktenzeichen:** {doc.get('aktenzeichen_info', {}).get('internes_az', '-')}")
-                            st.write(f"**Sachbearbeiter:** {doc.get('sachbearbeiter', '-')}")
-
-                        with col2:
-                            analyse = doc.get('analyse', {})
-                            st.write(f"**Datum:** {analyse.get('datum', '-')}")
-                            st.write(f"**Mandant:** {analyse.get('mandant', '-')}")
-                            st.write(f"**Gegner:** {analyse.get('gegner', '-')}")
-
-                        # Stichworte
-                        if analyse.get('stichworte'):
-                            st.write(f"**Stichworte:** {', '.join(analyse.get('stichworte', []))}")
-
-                        # Fristen
-                        deadline_info = analyse.get('deadline_info', {})
-                        if deadline_info.get('earliest_deadline'):
-                            st.markdown("### ⏰ Fristen")
-                            earliest = deadline_info['earliest_deadline']
-                            st.warning(f"**Frist:** {earliest.get('datum', '-')} - {earliest.get('beschreibung', '-')}")
-
-                        # Text-Vorschau
-                        st.markdown("### 📝 Text-Vorschau")
-                        doc_text = doc.get('dokument', {}).get('text', '')
-                        st.text_area("Dokumententext:", value=doc_text[:1000] + ("..." if len(doc_text) > 1000 else ""), height=200, key=f"text_{doc.get('dateiname')}")
-
-                        # Download-Button für PDF
-                        if 'dokument' in doc and 'pdf_bytes' in doc['dokument']:
-                            st.download_button(
-                                label="📥 PDF herunterladen",
-                                data=doc['dokument']['pdf_bytes'],
-                                file_name=doc.get('dateiname', 'dokument.pdf'),
-                                mime="application/pdf",
-                                key=f"download_{doc.get('dateiname')}"
-                            )
-
-        # Markiere als gesehen
-        if st.button("✅ Alle als gesehen markieren"):
-            doc_ids = [d.get('dateiname') for d in dashboard_data['unseen_documents']]
-            user_dash.mark_documents_as_seen(current_user['id'], doc_ids)
+    # Lösch-Button für gespeicherten Key
+    if has_saved_key:
+        if st.sidebar.button(f"🗑️ {api_provider} Key löschen", key=f"delete_{current_provider_key}"):
+            storage.delete_api_key(current_provider_key)
+            st.session_state.api_keys[current_provider_key] = ''
             st.rerun()
 
-st.markdown("---")
+    # Hole aktuellen Key
+    current_api_key = st.session_state.api_keys.get(current_provider_key, '')
 
-# ============================================================================
+    # API-Key Verbindungstest
+    if current_api_key:
+        try:
+            if api_provider == "OpenAI (ChatGPT)":
+                from openai import OpenAI
+                test_client = OpenAI(api_key=current_api_key)
+                test_client.models.list()
+                st.sidebar.markdown("🟢 **Verbindung erfolgreich**")
+
+            elif api_provider == "Claude (Anthropic)":
+                import anthropic
+                test_client = anthropic.Anthropic(api_key=current_api_key)
+                # Test mit einfachem API-Aufruf
+                test_client.models.list()
+                st.sidebar.markdown("🟢 **Verbindung erfolgreich**")
+
+            elif api_provider == "Gemini (Google)":
+                import google.generativeai as genai
+                genai.configure(api_key=current_api_key)
+                # Test: Liste verfügbare Modelle
+                list(genai.list_models())
+                st.sidebar.markdown("🟢 **Verbindung erfolgreich**")
+
+        except Exception as e:
+            error_msg = str(e)
+            if "authentication" in error_msg.lower() or "api key" in error_msg.lower() or "api_key" in error_msg.lower():
+                st.sidebar.markdown("🔴 **Ungültiger API-Key**")
+            else:
+                st.sidebar.markdown(f"🟡 **Verbindungsfehler**: {error_msg[:100]}")
+    else:
+        st.sidebar.markdown("⚪ **Kein API-Key eingegeben**")
+
+    st.sidebar.markdown("---")
+
+    # Dokumententrennung (fest: nur "Trennseite"-Text)
+    st.sidebar.subheader("📑 Dokumententrennung")
+    st.sidebar.info("Dokumente werden durch Seiten mit dem Text **'Trennseite'** getrennt.")
+
+    st.sidebar.markdown("---")
+    st.sidebar.info("""
+    **Sachbearbeiter:**
+    - SQ: Rechtsanwalt und Notar Sven-Bryde Meier
+    - TS: Rechtsanwältin Tamara Meyer
+    - M/MQ: Rechtsanwältin Ann-Kathrin Marquardsen
+    - FÜ: Rechtsanwalt Dr. Fürsen
+    - CV: Rechtsanwalt Christian Ostertun
+    """)
+
+    # Papierkorb-Einstellungen
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🗑️ Papierkorb")
+
+    # Statistiken
+    trash_stats = trash_manager.get_statistics()
+    if trash_stats['total_items'] > 0:
+        st.sidebar.warning(f"📦 {trash_stats['total_items']} Dokument(e) im Papierkorb")
+
+        # Zeige abgelaufene Dokumente
+        if trash_stats['expired_items'] > 0:
+            st.sidebar.error(f"⚠️ {trash_stats['expired_items']} abgelaufen")
+    else:
+        st.sidebar.success("✅ Papierkorb leer")
+
+    # Aufbewahrungszeit einstellen
+    with st.sidebar.expander("⚙️ Einstellungen"):
+        current_hours = trash_manager.get_retention_hours()
+
+        retention_hours = st.number_input(
+            "Aufbewahrungszeit (Stunden):",
+            min_value=1,
+            max_value=720,  # 30 Tage
+            value=current_hours,
+            step=1,
+            help="Dokumente werden nach dieser Zeit automatisch gelöscht"
+        )
+
+        if retention_hours != current_hours:
+            trash_manager.set_retention_hours(retention_hours)
+            st.success(f"✅ Aufbewahrungszeit auf {retention_hours}h gesetzt")
+
+        # Schnell-Auswahl
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("24h", width="stretch"):
+                trash_manager.set_retention_hours(24)
+                st.rerun()
+        with col2:
+            if st.button("48h", width="stretch"):
+                trash_manager.set_retention_hours(48)
+                st.rerun()
+
+        col3, col4 = st.columns(2)
+        with col3:
+            if st.button("7 Tage", width="stretch"):
+                trash_manager.set_retention_hours(168)
+                st.rerun()
+        with col4:
+            if st.button("30 Tage", width="stretch"):
+                trash_manager.set_retention_hours(720)
+                st.rerun()
+
+    # Hot Folder Status
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📁 Hot Folder")
+    if st.session_state.hot_folder_watcher and st.session_state.hot_folder_watcher.is_running():
+        st.sidebar.success("✅ Aktiv")
+        stats = st.session_state.hot_folder_watcher.get_statistics()
+        st.sidebar.metric("Verarbeitet", stats['processed'])
+    else:
+        st.sidebar.info("⏸️ Nicht aktiv")
+
+    # Auto-Ablage Status
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("☁️ Auto-Ablage")
+    auto_storage = st.session_state.auto_file_storage
+    if auto_storage.is_enabled():
+        st.sidebar.success("✅ Aktiviert")
+        storage_stats = auto_storage.get_statistics()
+        st.sidebar.metric("Gespeichert", storage_stats['total_stored'])
+    else:
+        st.sidebar.info("⏸️ Deaktiviert")
+
+    # Backup Status
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("💾 Backup")
+    backup_mgr = st.session_state.backup_manager
+    backup_stats = backup_mgr.get_statistics()
+    if backup_stats['enabled']:
+        st.sidebar.success(f"✅ {backup_stats['frequency']}")
+        st.sidebar.metric("Backups", backup_stats['total_backups'])
+    else:
+        st.sidebar.info("⏸️ Deaktiviert")
+
+    # Wiedervorlagen
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📌 Wiedervorlagen")
+    wv_system = st.session_state.wiedervorlage_system
+    wv_stats = wv_system.get_statistics()
+    if wv_stats['aktiv'] > 0:
+        st.sidebar.warning(f"⚠️ {wv_stats['aktiv']} aktiv")
+        if wv_stats['ueberfaellig'] > 0:
+            st.sidebar.error(f"🔴 {wv_stats['ueberfaellig']} überfällig")
+        if wv_stats['heute'] > 0:
+            st.sidebar.warning(f"🟠 {wv_stats['heute']} heute fällig")
+    else:
+        st.sidebar.success("✅ Keine Wiedervorlagen")
+
+    # Admin/Empfang-Bereich
+    if current_user['role'] in ['Administrator', 'Empfang']:
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("👥 Benutzerverwaltung")
+
+        with st.sidebar.expander("➕ Benutzer einladen"):
+            inv_email = st.text_input("Email:", key="sidebar_inv_email")
+            inv_role = st.selectbox("Rolle:", [
+                "Sachbearbeiter",
+                "Rechtsanwalt",
+                "Empfang",
+                "Administrator"
+            ])
+            inv_name = st.text_input("Name:", key="sidebar_inv_name")
+            inv_kuerzel = st.text_input("Kürzel (z.B. SQ):", key="sidebar_inv_kuerzel")
+
+            if st.button("📧 Einladung versenden", key="sidebar_send_inv"):
+                if inv_email and inv_name and inv_kuerzel:
+                    token = user_manager.create_invitation(
+                        email=inv_email,
+                        role=inv_role,
+                        created_by=current_user['email'],
+                        name=inv_name,
+                        kuerzel=inv_kuerzel
+                    )
+
+                    invitation_link = f"?invitation={token}"
+                    st.success("✅ Einladung erstellt!")
+                    st.code(f"Token: {token[:32]}...")
+                    st.caption("Link an Benutzer senden")
+                else:
+                    st.warning("⚠️ Alle Felder ausfüllen")
+
+        # Kürzel-Verwaltung
+        with st.sidebar.expander("🏷️ Kürzel verwalten"):
+            st.caption("Kürzel für neue Mitarbeiter, Rechtsanwälte oder Notare hinzufügen")
+
+            # Bestehende Kürzel anzeigen
+            custom_kuerzel = storage.get_all_kuerzel_with_names()
+
+            if custom_kuerzel:
+                st.markdown("**Gespeicherte Kürzel:**")
+                for kuerzel, data in custom_kuerzel.items():
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.text(f"{kuerzel} → {data['name']} ({data.get('category', 'Mitarbeiter')})")
+                    with col2:
+                        if st.button("❌", key=f"del_kuerzel_{kuerzel}", help=f"{kuerzel} löschen"):
+                            if storage.delete_kuerzel(kuerzel):
+                                st.success(f"✅ {kuerzel} gelöscht!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Fehler beim Löschen")
+
+            st.markdown("---")
+            st.markdown("**Neues Kürzel hinzufügen:**")
+
+            new_kuerzel = st.text_input("Kürzel (z.B. GO):", key="sidebar_new_kuerzel", max_chars=3)
+            new_name = st.text_input("Name:", key="sidebar_new_name")
+            new_category = st.selectbox("Kategorie:", [
+                "Mitarbeiter",
+                "Rechtsanwalt",
+                "Rechtsanwältin",
+                "Notar",
+                "Notarin"
+            ], key="sidebar_new_category")
+
+            if st.button("➕ Kürzel hinzufügen", key="sidebar_add_kuerzel"):
+                if new_kuerzel and new_name:
+                    if storage.add_kuerzel(new_kuerzel.upper().strip(), new_name.strip(), new_category):
+                        st.success(f"✅ Kürzel {new_kuerzel.upper()} hinzugefügt!")
+                        st.info("ℹ️ Das neue Kürzel wird beim nächsten Upload verwendet.")
+                        st.rerun()
+                    else:
+                        st.error("❌ Fehler beim Hinzufügen (max. 3 Zeichen)")
+                else:
+                    st.warning("⚠️ Beide Felder ausfüllen")
+
+        # RENO-Zuordnungen verwalten (Empfänger für Email-Versand)
+        with st.sidebar.expander("📧 Email-Empfänger verwalten"):
+            st.caption("Zuordnung von Empfängern (RENOs) zu Sachbearbeitern für den Email-Versand")
+
+            reno_zuordnungen = storage.get_reno_zuordnungen()
+
+            # Sachbearbeiter auswählen
+            sb_liste = list(reno_zuordnungen.keys())
+            if 'nicht-zugeordnet' not in sb_liste:
+                sb_liste.append('nicht-zugeordnet')
+
+            selected_sb = st.selectbox(
+                "Sachbearbeiter:",
+                options=sb_liste,
+                key="reno_admin_sb"
+            )
+
+            # Aktuelle Empfänger anzeigen
+            if selected_sb and selected_sb in reno_zuordnungen:
+                st.markdown(f"**Empfänger für {selected_sb}:**")
+                for reno in reno_zuordnungen[selected_sb]:
+                    col_r1, col_r2 = st.columns([3, 1])
+                    with col_r1:
+                        st.text(f"{reno['name']}\n{reno['email']}")
+                    with col_r2:
+                        if st.button("❌", key=f"del_reno_{selected_sb}_{reno['email']}", help="Entfernen"):
+                            if storage.remove_reno_von_sachbearbeiter(selected_sb, reno['email']):
+                                st.success("✅ Entfernt!")
+                                st.rerun()
+
+            st.markdown("---")
+            st.markdown("**Neuen Empfänger hinzufügen:**")
+
+            new_reno_name = st.text_input("Name:", key="new_reno_name", placeholder="Max Mustermann")
+            new_reno_email = st.text_input("Email:", key="new_reno_email", placeholder="max@ra-rhm.de")
+
+            if st.button("➕ Empfänger hinzufügen", key="add_reno_btn"):
+                if new_reno_name and new_reno_email and selected_sb:
+                    if storage.add_reno_zu_sachbearbeiter(selected_sb, new_reno_name.strip(), new_reno_email.strip()):
+                        st.success(f"✅ {new_reno_name} zu {selected_sb} hinzugefügt!")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Email bereits vorhanden")
+                else:
+                    st.warning("⚠️ Alle Felder ausfüllen")
+
+            # Neuen Sachbearbeiter für Zuordnungen
+            st.markdown("---")
+            new_sb_for_reno = st.text_input("Neuer Sachbearbeiter (Kürzel):", key="new_sb_reno", max_chars=3)
+            if st.button("➕ Sachbearbeiter anlegen", key="add_sb_reno"):
+                if new_sb_for_reno:
+                    sb_upper = new_sb_for_reno.upper().strip()
+                    if sb_upper not in reno_zuordnungen:
+                        reno_zuordnungen[sb_upper] = []
+                        storage.save_reno_zuordnungen(reno_zuordnungen)
+                        st.success(f"✅ {sb_upper} angelegt!")
+                        st.rerun()
+                    else:
+                        st.info(f"ℹ️ {sb_upper} existiert bereits")
+
+        # Benutzer-Übersicht
+        all_users = user_manager.get_all_users()
+        active_users = [u for u in all_users if u.get('active', True)]
+        st.sidebar.metric("Aktive Benutzer", len(active_users))
+
+    # ============================================================================
+    # PERSONALISIERTES DASHBOARD
+    # ============================================================================
+
+    st.header(f"👋 Willkommen, {current_user['name']}")
+
+    # Dashboard-Daten holen
+    dashboard_data = user_dash.get_dashboard_data(current_user, storage)
+
+    # KPIs
+    col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+
+    with col_kpi1:
+        st.metric("Meine Dokumente", dashboard_data['total'])
+
+    with col_kpi2:
+        new_count = dashboard_data['new_count']
+        st.metric("Neu (24h)", new_count)
+        if new_count > 0:
+            # Sende Benachrichtigung wenn noch nicht gesehen
+            if dashboard_data['unseen_count'] > 0:
+                browser_notif.send_notification_to_user(
+                    current_user['id'],
+                    f"📬 Neuer Posteingang",
+                    f"{new_count} neue Dokument(e) für Sie!"
+                )
+
+    with col_kpi3:
+        st.metric("Ungesehen", dashboard_data['unseen_count'])
+
+    with col_kpi4:
+        critical = dashboard_data['statistics']['by_priority'].get('CRITICAL', 0)
+        st.metric("Kritische Fristen", critical)
+
+    st.markdown("---")
+
+    # Neue/Ungesehene Dokumente
+    if dashboard_data['unseen_count'] > 0:
+        with st.expander(f"📬 {dashboard_data['unseen_count']} neue Dokument(e)", expanded=True):
+            for doc in dashboard_data['unseen_documents'][:5]:
+                col_a, col_b, col_c = st.columns([3, 1, 1])
+
+                with col_a:
+                    st.write(f"**{doc.get('dateiname', 'Unbekannt')}**")
+                    st.caption(f"AZ: {doc.get('aktenzeichen_info', {}).get('internes_az', '-')}")
+
+                with col_b:
+                    priority = doc.get('analyse', {}).get('deadline_info', {}).get('priority', 'NORMAL')
+                    st.caption(f"Priorität: {priority}")
+
+                with col_c:
+                    if st.button("📥 Details", key=f"view_{doc.get('dateiname')}"):
+                        # Zeige Details des Dokuments
+                        with st.expander(f"📄 Details: {doc.get('dateiname')}", expanded=True):
+                            # Basis-Informationen
+                            st.markdown("### 📋 Dokumenten-Information")
+                            col1, col2 = st.columns(2)
+
+                            with col1:
+                                st.write(f"**Dateiname:** {doc.get('dateiname', '-')}")
+                                st.write(f"**Aktenzeichen:** {doc.get('aktenzeichen_info', {}).get('internes_az', '-')}")
+                                st.write(f"**Sachbearbeiter:** {doc.get('sachbearbeiter', '-')}")
+
+                            with col2:
+                                analyse = doc.get('analyse', {})
+                                st.write(f"**Datum:** {analyse.get('datum', '-')}")
+                                st.write(f"**Mandant:** {analyse.get('mandant', '-')}")
+                                st.write(f"**Gegner:** {analyse.get('gegner', '-')}")
+
+                            # Stichworte
+                            if analyse.get('stichworte'):
+                                st.write(f"**Stichworte:** {', '.join(analyse.get('stichworte', []))}")
+
+                            # Fristen
+                            deadline_info = analyse.get('deadline_info', {})
+                            if deadline_info.get('earliest_deadline'):
+                                st.markdown("### ⏰ Fristen")
+                                earliest = deadline_info['earliest_deadline']
+                                st.warning(f"**Frist:** {earliest.get('datum', '-')} - {earliest.get('beschreibung', '-')}")
+
+                            # Text-Vorschau
+                            st.markdown("### 📝 Text-Vorschau")
+                            doc_text = doc.get('dokument', {}).get('text', '')
+                            st.text_area("Dokumententext:", value=doc_text[:1000] + ("..." if len(doc_text) > 1000 else ""), height=200, key=f"text_{doc.get('dateiname')}")
+
+                            # Download-Button für PDF
+                            if 'dokument' in doc and 'pdf_bytes' in doc['dokument']:
+                                st.download_button(
+                                    label="📥 PDF herunterladen",
+                                    data=doc['dokument']['pdf_bytes'],
+                                    file_name=doc.get('dateiname', 'dokument.pdf'),
+                                    mime="application/pdf",
+                                    key=f"download_{doc.get('dateiname')}"
+                                )
+
+            # Markiere als gesehen
+            if st.button("✅ Alle als gesehen markieren"):
+                doc_ids = [d.get('dateiname') for d in dashboard_data['unseen_documents']]
+                user_dash.mark_documents_as_seen(current_user['id'], doc_ids)
+                st.rerun()
+
+    st.markdown("---")
+
+    # ============================================================================
 # POST-EINGANG (Nur für Empfang/Admin)
 # ============================================================================
 
