@@ -772,7 +772,7 @@ provider_key_map = {
 current_provider_key = provider_key_map[api_provider]
 current_api_key = st.session_state.api_keys.get(current_provider_key, '')
 
-# EMPFANG: Minimale Sidebar
+# EMPFANG: Minimale Sidebar mit Anleitung
 if ist_empfang:
     st.sidebar.markdown("## 📬 Empfang")
     st.sidebar.info(f"**{current_user['name']}**")
@@ -781,6 +781,27 @@ if ist_empfang:
         st.sidebar.success("✅ System bereit")
     else:
         st.sidebar.error("⚠️ System nicht konfiguriert")
+
+    # Anleitung für Empfang
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📖 Anleitung")
+    st.sidebar.markdown("""
+**Schritt 1: Aktenregister**
+- Excel-Datei mit Akten hochladen
+- Wird automatisch gespeichert
+- 🟢 Grün = Register vorhanden
+
+**Schritt 2: Post scannen**
+- PDF-Dateien hochladen (Drag & Drop)
+- "Verarbeitung starten" klicken
+- 🟡 Gelb = Bereit
+- 🟠 Orange = Läuft
+- 🟢 Grün = Fertig
+
+**Schritt 3: Verteilen**
+- ZIP-Downloads pro Sachbearbeiter
+- Oder per Email versenden
+    """)
     # Keine weiteren Sidebar-Elemente für Empfang
 
 # RENO/ADMIN: Vollständige Sidebar
@@ -3140,582 +3161,583 @@ if trash_items:
 else:
     st.success("✅ Papierkorb ist leer")
 
-# Erweiterte Features in Tabs
-st.markdown("---")
-st.header("🚀 Erweiterte Features")
+# Erweiterte Features in Tabs - NUR für RENO/Admin (nicht für Empfang)
+if not ist_empfang:
+    st.markdown("---")
+    st.header("🚀 Erweiterte Features")
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "📊 Dashboard",
-    "🔍 Volltext-Suche",
-    "📌 Wiedervorlagen",
-    "📧 Email-Import",
-    "📁 Hot Folder & Ablage",
-    "🔔 Benachrichtigungen",
-    "⚙️ System & Backup"
-])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📊 Dashboard",
+        "🔍 Volltext-Suche",
+        "📌 Wiedervorlagen",
+        "📧 Email-Import",
+        "📁 Hot Folder & Ablage",
+        "🔔 Benachrichtigungen",
+        "⚙️ System & Backup"
+    ])
 
-with tab1:
-    st.subheader("📊 Dashboard & Statistiken")
+    with tab1:
+        st.subheader("📊 Dashboard & Statistiken")
 
-    try:
-        import plotly.graph_objects as go
-        import plotly.express as px
+        try:
+            import plotly.graph_objects as go
+            import plotly.express as px
 
-        dashboard_mgr = st.session_state.dashboard_manager
+            dashboard_mgr = st.session_state.dashboard_manager
 
-        # KPIs
-        col1, col2, col3, col4 = st.columns(4)
+            # KPIs
+            col1, col2, col3, col4 = st.columns(4)
 
-        timeline_data = dashboard_mgr.get_documents_timeline(days=30)
-        sb_data = dashboard_mgr.get_sachbearbeiter_distribution()
-        deadline_data = dashboard_mgr.get_deadline_summary(storage)
+            timeline_data = dashboard_mgr.get_documents_timeline(days=30)
+            sb_data = dashboard_mgr.get_sachbearbeiter_distribution()
+            deadline_data = dashboard_mgr.get_deadline_summary(storage)
 
-        with col1:
-            st.metric("Dokumente (30 Tage)", timeline_data['total'])
-        with col2:
-            st.metric("Kritische Fristen", deadline_data['critical'])
-        with col3:
-            st.metric("Sachbearbeiter", len(sb_data['sachbearbeiter']))
-        with col4:
-            st.metric("Überfällig", deadline_data['overdue'])
+            with col1:
+                st.metric("Dokumente (30 Tage)", timeline_data['total'])
+            with col2:
+                st.metric("Kritische Fristen", deadline_data['critical'])
+            with col3:
+                st.metric("Sachbearbeiter", len(sb_data['sachbearbeiter']))
+            with col4:
+                st.metric("Überfällig", deadline_data['overdue'])
 
-        st.markdown("---")
+            st.markdown("---")
 
-        # Timeline Chart
-        col_a, col_b = st.columns(2)
+            # Timeline Chart
+            col_a, col_b = st.columns(2)
 
-        with col_a:
-            st.subheader("Dokumente-Zeitverlauf")
-            if timeline_data['dates']:
-                fig_timeline = go.Figure()
-                fig_timeline.add_trace(go.Scatter(
-                    x=timeline_data['dates'],
-                    y=timeline_data['counts'],
-                    mode='lines+markers',
-                    name='Dokumente',
-                    line=dict(color='#1f77b4', width=2),
-                    marker=dict(size=8)
+            with col_a:
+                st.subheader("Dokumente-Zeitverlauf")
+                if timeline_data['dates']:
+                    fig_timeline = go.Figure()
+                    fig_timeline.add_trace(go.Scatter(
+                        x=timeline_data['dates'],
+                        y=timeline_data['counts'],
+                        mode='lines+markers',
+                        name='Dokumente',
+                        line=dict(color='#1f77b4', width=2),
+                        marker=dict(size=8)
+                    ))
+                    fig_timeline.update_layout(
+                        xaxis_title="Datum",
+                        yaxis_title="Anzahl Dokumente",
+                        height=300
+                    )
+                    st.plotly_chart(fig_timeline, width="stretch")
+
+            with col_b:
+                st.subheader("Verteilung Sachbearbeiter")
+                if sb_data['sachbearbeiter']:
+                    fig_sb = px.pie(
+                        values=sb_data['counts'],
+                        names=sb_data['sachbearbeiter'],
+                        title="Dokumente pro Sachbearbeiter"
+                    )
+                    fig_sb.update_layout(height=300)
+                    st.plotly_chart(fig_sb, width="stretch")
+
+            # Prioritäten
+            st.markdown("---")
+            st.subheader("Fristen-Übersicht")
+
+            col_c, col_d = st.columns(2)
+
+            with col_c:
+                # Fristen-Status
+                fig_deadlines = go.Figure()
+                fig_deadlines.add_trace(go.Bar(
+                    x=['Kritisch', 'Hoch', 'Mittel', 'Normal', 'Überfällig'],
+                    y=[
+                        deadline_data['critical'],
+                        deadline_data['high'],
+                        deadline_data['medium'],
+                        deadline_data['normal'],
+                        deadline_data['overdue']
+                    ],
+                    marker_color=['red', 'orange', 'yellow', 'green', 'darkred']
                 ))
-                fig_timeline.update_layout(
-                    xaxis_title="Datum",
-                    yaxis_title="Anzahl Dokumente",
+                fig_deadlines.update_layout(
+                    title="Fristen nach Priorität",
+                    xaxis_title="Priorität",
+                    yaxis_title="Anzahl",
                     height=300
                 )
-                st.plotly_chart(fig_timeline, width="stretch")
+                st.plotly_chart(fig_deadlines, width="stretch")
 
-        with col_b:
-            st.subheader("Verteilung Sachbearbeiter")
-            if sb_data['sachbearbeiter']:
-                fig_sb = px.pie(
-                    values=sb_data['counts'],
-                    names=sb_data['sachbearbeiter'],
-                    title="Dokumente pro Sachbearbeiter"
+            with col_d:
+                # API-Nutzung
+                api_data = dashboard_mgr.get_api_usage_stats()
+                if api_data['providers']:
+                    fig_api = px.bar(
+                        x=api_data['providers'],
+                        y=api_data['counts'],
+                        title="API-Nutzung",
+                        labels={'x': 'Provider', 'y': 'Anzahl Aufrufe'}
+                    )
+                    fig_api.update_layout(height=300)
+                    st.plotly_chart(fig_api, width="stretch")
+
+        except ImportError:
+            st.warning("⚠️ Plotly nicht installiert. Installieren Sie mit: pip install plotly")
+
+            # Fallback: Einfache Statistiken
+            st.write("**Statistiken verfügbar - Plotly für Charts benötigt**")
+
+    with tab2:
+        st.subheader("🔍 Volltext-Suche")
+
+        search = st.session_state.fulltext_search
+
+        if not search.is_available():
+            st.error("⚠️ Whoosh nicht installiert. Installieren Sie mit: pip install whoosh")
+        else:
+            col1, col2 = st.columns([3, 1])
+
+            with col1:
+                query = st.text_input("Suchbegriff:", placeholder="Aktenzeichen, Mandant, Text...")
+
+            with col2:
+                fuzzy = st.checkbox("Fuzzy-Suche", value=False)
+
+            if st.button("🔍 Suchen", type="primary"):
+                if query:
+                    results = search.search(query, limit=50, fuzzy=fuzzy)
+
+                    st.write(f"**{len(results)} Ergebnisse gefunden**")
+
+                    for result in results:
+                        with st.expander(f"📄 {result['dateiname']} ({result['aktenzeichen']})"):
+                            st.write(f"**Sachbearbeiter:** {result['sachbearbeiter']}")
+                            st.write(f"**Datum:** {result['datum']}")
+                            st.write(f"**Priorität:** {result['priority']}")
+
+                            if result['excerpt']:
+                                st.markdown("**Textauszug:**")
+                                st.markdown(result['excerpt'], unsafe_allow_html=True)
+
+            # Statistiken
+            st.markdown("---")
+            search_stats = search.get_statistics()
+            if search_stats['available']:
+                st.metric("Indexierte Dokumente", search_stats['total_documents'])
+
+                if st.button("🔄 Index neu aufbauen"):
+                    with st.spinner("Index wird neu aufgebaut..."):
+                        count = search.rebuild_index(storage)
+                        st.success(f"✅ {count} Dokumente indexiert")
+
+    with tab3:
+        st.subheader("📌 Wiedervorlage-System")
+
+        wv = st.session_state.wiedervorlage_system
+
+        # Neue Wiedervorlage
+        with st.expander("➕ Neue Wiedervorlage erstellen"):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                wv_titel = st.text_input("Titel:")
+                wv_aktenzeichen = st.text_input("Aktenzeichen (optional):")
+                wv_sb = st.text_input("Sachbearbeiter (optional):")
+
+            with col2:
+                wv_datum = st.date_input("Wiedervorlage-Datum:")
+                wv_priority = st.selectbox("Priorität:", ["NORMAL", "MEDIUM", "HIGH", "CRITICAL"])
+                wv_notiz = st.text_area("Notiz:")
+
+            if st.button("💾 Wiedervorlage anlegen", type="primary"):
+                from datetime import datetime
+                wv_id = wv.create_wiedervorlage(
+                    titel=wv_titel,
+                    datum=datetime.combine(wv_datum, datetime.min.time()),
+                    aktenzeichen=wv_aktenzeichen if wv_aktenzeichen else None,
+                    sachbearbeiter=wv_sb if wv_sb else None,
+                    notiz=wv_notiz,
+                    priority=wv_priority
                 )
-                fig_sb.update_layout(height=300)
-                st.plotly_chart(fig_sb, width="stretch")
+                st.success(f"✅ Wiedervorlage erstellt (ID: {wv_id[:8]}...)")
 
-        # Prioritäten
+        # Fällige Wiedervorlagen
         st.markdown("---")
-        st.subheader("Fristen-Übersicht")
+        st.subheader("⚠️ Fällige Wiedervorlagen")
 
-        col_c, col_d = st.columns(2)
+        faellig = wv.get_faellige_wiedervorlagen(tage_vorher=7)
 
-        with col_c:
-            # Fristen-Status
-            fig_deadlines = go.Figure()
-            fig_deadlines.add_trace(go.Bar(
-                x=['Kritisch', 'Hoch', 'Mittel', 'Normal', 'Überfällig'],
-                y=[
-                    deadline_data['critical'],
-                    deadline_data['high'],
-                    deadline_data['medium'],
-                    deadline_data['normal'],
-                    deadline_data['overdue']
-                ],
-                marker_color=['red', 'orange', 'yellow', 'green', 'darkred']
-            ))
-            fig_deadlines.update_layout(
-                title="Fristen nach Priorität",
-                xaxis_title="Priorität",
-                yaxis_title="Anzahl",
-                height=300
-            )
-            st.plotly_chart(fig_deadlines, width="stretch")
+        if faellig:
+            for item in faellig:
+                color = "🔴" if item['is_overdue'] else ("🟠" if item['days_remaining'] <= 3 else "🟡")
 
-        with col_d:
-            # API-Nutzung
-            api_data = dashboard_mgr.get_api_usage_stats()
-            if api_data['providers']:
-                fig_api = px.bar(
-                    x=api_data['providers'],
-                    y=api_data['counts'],
-                    title="API-Nutzung",
-                    labels={'x': 'Provider', 'y': 'Anzahl Aufrufe'}
-                )
-                fig_api.update_layout(height=300)
-                st.plotly_chart(fig_api, width="stretch")
+                with st.expander(f"{color} {item['titel']} ({item['datum'][:10]})"):
+                    st.write(f"**Aktenzeichen:** {item['aktenzeichen']}")
+                    st.write(f"**Sachbearbeiter:** {item['sachbearbeiter']}")
+                    st.write(f"**Priorität:** {item['priority']}")
+                    st.write(f"**Verbleibende Tage:** {item['days_remaining']}")
+                    st.write(f"**Notiz:** {item['notiz']}")
 
-    except ImportError:
-        st.warning("⚠️ Plotly nicht installiert. Installieren Sie mit: pip install plotly")
+                    col1, col2, col3 = st.columns(3)
 
-        # Fallback: Einfache Statistiken
-        st.write("**Statistiken verfügbar - Plotly für Charts benötigt**")
+                    with col1:
+                        if st.button("✅ Erledigt", key=f"done_{item['id']}"):
+                            wv.mark_erledigt(item['id'])
+                            st.rerun()
 
-with tab2:
-    st.subheader("🔍 Volltext-Suche")
+                    with col2:
+                        if st.button("📅 Verschieben", key=f"move_{item['id']}"):
+                            # Session-State für Modal-Dialog
+                            st.session_state[f"move_dialog_{item['id']}"] = True
 
-    search = st.session_state.fulltext_search
+                    # Verschieben-Dialog (außerhalb der Spalten)
+                    if st.session_state.get(f"move_dialog_{item['id']}", False):
+                        with st.form(key=f"move_form_{item['id']}"):
+                            st.markdown("#### 📅 Wiedervorlage verschieben")
+                            from datetime import datetime, timedelta
 
-    if not search.is_available():
-        st.error("⚠️ Whoosh nicht installiert. Installieren Sie mit: pip install whoosh")
-    else:
-        col1, col2 = st.columns([3, 1])
+                            # Aktuelles Datum
+                            current_date = datetime.fromisoformat(item['datum'][:10])
+
+                            # Neues Datum
+                            new_date = st.date_input(
+                                "Neues Datum:",
+                                value=current_date + timedelta(days=7),
+                                min_value=datetime.now().date()
+                            )
+
+                            # Notiz hinzufügen
+                            move_note = st.text_area("Grund für Verschiebung (optional):", key=f"note_{item['id']}")
+
+                            col_btn1, col_btn2 = st.columns(2)
+
+                            with col_btn1:
+                                if st.form_submit_button("✅ Verschieben", type="primary"):
+                                    # Aktualisiere Datum
+                                    wv.update_wiedervorlage(item['id'], {'datum': datetime.combine(new_date, datetime.min.time()).isoformat()})
+
+                                    # Füge Notiz hinzu wenn vorhanden
+                                    if move_note:
+                                        current_notiz = item.get('notiz', '')
+                                        updated_notiz = f"{current_notiz}\n\n[Verschoben am {datetime.now().strftime('%Y-%m-%d')}]: {move_note}"
+                                        wv.update_wiedervorlage(item['id'], {'notiz': updated_notiz})
+
+                                    st.session_state[f"move_dialog_{item['id']}"] = False
+                                    st.success(f"✅ Wiedervorlage auf {new_date} verschoben!")
+                                    st.rerun()
+
+                            with col_btn2:
+                                if st.form_submit_button("❌ Abbrechen"):
+                                    st.session_state[f"move_dialog_{item['id']}"] = False
+                                    st.rerun()
+
+                    with col3:
+                        if st.button("🗑️ Löschen", key=f"del_{item['id']}"):
+                            wv.delete(item['id'])
+                            st.rerun()
+        else:
+            st.success("✅ Keine fälligen Wiedervorlagen")
+
+    with tab4:
+        st.subheader("📧 Email-Import (IMAP)")
+
+        email_imp = st.session_state.email_importer
+
+        # Konfiguration
+        with st.expander("⚙️ IMAP-Konfiguration"):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                imap_server = st.text_input("IMAP-Server:", value="imap.gmail.com", key="email_import_imap_server")
+                imap_username = st.text_input("Email:", key="email_import_username")
+
+            with col2:
+                imap_port = st.number_input("Port:", value=993, key="email_import_port")
+                imap_password = st.text_input("Passwort:", type="password", key="email_import_password")
+
+            if st.button("💾 IMAP Konfigurieren"):
+                email_imp.configure(imap_server, imap_username, imap_password, imap_port)
+                st.success("✅ IMAP konfiguriert")
+
+            # Test
+            if email_imp.is_enabled():
+                if st.button("🔌 Verbindung testen"):
+                    success, message = email_imp.test_connection()
+                    if success:
+                        st.success(message)
+                    else:
+                        st.error(message)
+
+        # Import
+        st.markdown("---")
+
+        if email_imp.is_enabled():
+            if st.button("📥 PDFs aus Emails importieren", type="primary"):
+                with st.spinner("Rufe Emails ab..."):
+                    emails = email_imp.fetch_emails_with_pdfs()
+
+                    if emails:
+                        st.success(f"✅ {len(emails)} Email(s) mit PDFs gefunden")
+
+                        for email_data in emails:
+                            with st.expander(f"📧 {email_data['subject']} ({len(email_data['pdfs'])} PDF(s))"):
+                                st.write(f"**Von:** {email_data['from']}")
+                                st.write(f"**Datum:** {email_data['date']}")
+
+                                for pdf in email_data['pdfs']:
+                                    st.write(f"- {pdf['filename']} ({pdf['size'] / 1024:.1f} KB)")
+
+                                if st.button(f"✅ Verarbeiten", key=f"process_{email_data['email_id']}"):
+                                    # Speichere PDFs zur Session für Verarbeitung
+                                    import tempfile
+                                    from pathlib import Path
+
+                                    # Erstelle temporäre Dateien für PDFs
+                                    if 'email_import_pdfs' not in st.session_state:
+                                        st.session_state.email_import_pdfs = []
+
+                                    for pdf in email_data['pdfs']:
+                                        st.session_state.email_import_pdfs.append({
+                                            'name': pdf['filename'],
+                                            'bytes': pdf['data'],
+                                            'from': email_data['from'],
+                                            'subject': email_data['subject']
+                                        })
+
+                                    # Markiere Email als verarbeitet
+                                    email_imp.mark_email_as_processed(email_data['email_id'])
+
+                                    st.success(f"✅ {len(email_data['pdfs'])} PDF(s) importiert und zur Verarbeitung bereitgestellt!")
+                                    st.info("📋 **Hinweis:** Die importierten PDFs stehen jetzt im Post-Eingang zur Verarbeitung bereit.")
+                                    st.info("💡 **Tipp:** Wechseln Sie zum Tab 'Post-Eingang' und laden Sie die PDFs dort hoch.")
+                    else:
+                        st.info("Keine neuen Emails mit PDFs gefunden")
+        else:
+            st.warning("⚠️ IMAP noch nicht konfiguriert")
+
+    with tab5:
+        st.subheader("📁 Hot Folder & Automatische Ablage")
+
+        # Hot Folder
+        st.markdown("### 🔥 Hot Folder Überwachung")
+
+        with st.expander("⚙️ Hot Folder konfigurieren"):
+            hot_folder_path = st.text_input("Überwachtes Verzeichnis:", value="./hot_folder")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if st.button("▶️ Hot Folder starten", type="primary"):
+                    from pathlib import Path
+
+                    watcher = HotFolderWatcher(Path(hot_folder_path))
+                    watcher.start()
+                    st.session_state.hot_folder_watcher = watcher
+                    st.success(f"✅ Hot Folder gestartet: {hot_folder_path}")
+
+            with col2:
+                if st.session_state.hot_folder_watcher:
+                    if st.button("⏸️ Hot Folder stoppen"):
+                        st.session_state.hot_folder_watcher.stop()
+                        st.session_state.hot_folder_watcher = None
+                        st.success("✅ Hot Folder gestoppt")
+
+        # Auto-Ablage
+        st.markdown("---")
+        st.markdown("### ☁️ Automatische Ablage")
+
+        auto_storage = st.session_state.auto_file_storage
+
+        with st.expander("⚙️ Auto-Ablage konfigurieren"):
+            storage_type = st.selectbox("Storage-Typ:", ["Lokal", "Netzlaufwerk", "Dropbox", "Google Drive"])
+            base_path = st.text_input("Basis-Pfad:", value="./ablage")
+
+            if st.button("💾 Auto-Ablage aktivieren"):
+                auto_storage.enable(base_path, storage_type)
+                st.success("✅ Auto-Ablage aktiviert")
+
+            # Test
+            if auto_storage.is_enabled():
+                if st.button("🔌 Verbindung testen"):
+                    success, message = auto_storage.test_connection()
+                    if success:
+                        st.success(message)
+                    else:
+                        st.error(message)
+
+    with tab6:
+        st.subheader("🔔 Benachrichtigungen & Kalender")
+
+        notif_mgr = st.session_state.notification_manager
+        cal_int = st.session_state.calendar_integration
+
+        # Benachrichtigungen
+        st.markdown("### 📧 Email-Benachrichtigungen")
+
+        with st.expander("⚙️ Email konfigurieren"):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                smtp_server = st.text_input("SMTP-Server:", value="smtp.gmail.com", key="notif_smtp_server")
+                smtp_port = st.number_input("SMTP-Port:", value=587, key="notif_smtp_port")
+                smtp_user = st.text_input("Benutzername:", key="notif_smtp_user")
+
+            with col2:
+                smtp_pass = st.text_input("Passwort:", type="password", key="notif_smtp_pass")
+                email_from = st.text_input("Absender-Email:", key="notif_email_from")
+                recipients = st.text_input("Empfänger (kommagetrennt):", key="notif_recipients")
+
+            if st.button("💾 Email-Benachrichtigungen konfigurieren"):
+                recipient_list = [r.strip() for r in recipients.split(',')]
+                notif_mgr.configure_email(smtp_server, smtp_port, smtp_user, smtp_pass, email_from, recipient_list)
+                st.success("✅ Email-Benachrichtigungen konfiguriert")
+
+            if notif_mgr.config.get('email_enabled'):
+                if st.button("🔌 Email-Verbindung testen"):
+                    success, message = notif_mgr.test_email_connection()
+                    if success:
+                        st.success(message)
+                    else:
+                        st.error(message)
+
+        # Kalender
+        st.markdown("---")
+        st.markdown("### 📅 Kalender-Integration")
+
+        with st.expander("⚙️ Kalender konfigurieren"):
+            cal_type = st.selectbox("Kalender-Typ:", ["Outlook/Exchange", "Google Calendar"])
+
+            if cal_type == "Outlook/Exchange":
+                client_id = st.text_input("Client ID:")
+                client_secret = st.text_input("Client Secret:", type="password")
+                tenant_id = st.text_input("Tenant ID:")
+
+                if st.button("💾 Outlook konfigurieren"):
+                    cal_int.configure_outlook(client_id, client_secret, tenant_id)
+                    st.success("✅ Outlook konfiguriert")
+
+            else:  # Google Calendar
+                creds_path = st.text_input("Credentials JSON Pfad:")
+
+                if st.button("💾 Google Calendar konfigurieren"):
+                    cal_int.configure_google(creds_path)
+                    st.success("✅ Google Calendar konfiguriert")
+
+            if cal_int.is_enabled():
+                if st.button("🔌 Kalender-Verbindung testen"):
+                    success, message = cal_int.test_connection()
+                    if success:
+                        st.success(message)
+                    else:
+                        st.error(message)
+
+    with tab7:
+        st.subheader("⚙️ System & Backup")
+
+        backup_mgr = st.session_state.backup_manager
+
+        # Backup-Einstellungen
+        st.markdown("### 💾 Backup-Verwaltung")
+
+        col1, col2 = st.columns(2)
 
         with col1:
-            query = st.text_input("Suchbegriff:", placeholder="Aktenzeichen, Mandant, Text...")
+            backup_enabled = st.checkbox("Automatische Backups aktivieren", value=backup_mgr.is_enabled())
+
+            if backup_enabled != backup_mgr.is_enabled():
+                if backup_enabled:
+                    backup_mgr.enable()
+                    st.success("✅ Backups aktiviert")
+                else:
+                    backup_mgr.disable()
+                    st.info("⏸️ Backups deaktiviert")
 
         with col2:
-            fuzzy = st.checkbox("Fuzzy-Suche", value=False)
+            if st.button("💾 Backup jetzt erstellen", type="primary"):
+                with st.spinner("Erstelle Backup..."):
+                    backup_path = backup_mgr.create_backup()
+                    if backup_path:
+                        st.success(f"✅ Backup erstellt: {backup_path.name}")
+                    else:
+                        st.error("❌ Backup fehlgeschlagen")
 
-        if st.button("🔍 Suchen", type="primary"):
-            if query:
-                results = search.search(query, limit=50, fuzzy=fuzzy)
+        # Backup-Liste
+        st.markdown("---")
+        st.subheader("📦 Vorhandene Backups")
 
-                st.write(f"**{len(results)} Ergebnisse gefunden**")
+        backups = backup_mgr.list_backups()
 
-                for result in results:
-                    with st.expander(f"📄 {result['dateiname']} ({result['aktenzeichen']})"):
-                        st.write(f"**Sachbearbeiter:** {result['sachbearbeiter']}")
-                        st.write(f"**Datum:** {result['datum']}")
-                        st.write(f"**Priorität:** {result['priority']}")
+        if backups:
+            for backup in backups:
+                with st.expander(f"📦 {backup['name']} ({backup['size_mb']:.1f} MB)"):
+                    st.write(f"**Erstellt:** {backup['created']}")
+                    st.write(f"**Alter:** {backup['age_days']} Tage")
 
-                        if result['excerpt']:
-                            st.markdown("**Textauszug:**")
-                            st.markdown(result['excerpt'], unsafe_allow_html=True)
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        if st.button("🔄 Wiederherstellen", key=f"restore_{backup['name']}"):
+                            if backup_mgr.restore_backup(Path(backup['path'])):
+                                st.success("✅ Wiederhergestellt")
+                            else:
+                                st.error("❌ Fehler")
+
+                    with col2:
+                        if st.button("🗑️ Löschen", key=f"del_backup_{backup['name']}"):
+                            if backup_mgr.delete_backup(backup['name']):
+                                st.success("✅ Gelöscht")
+                                st.rerun()
+        else:
+            st.info("Noch keine Backups vorhanden")
 
         # Statistiken
         st.markdown("---")
-        search_stats = search.get_statistics()
-        if search_stats['available']:
-            st.metric("Indexierte Dokumente", search_stats['total_documents'])
+        st.subheader("📊 System-Statistiken")
 
-            if st.button("🔄 Index neu aufbauen"):
-                with st.spinner("Index wird neu aufgebaut..."):
-                    count = search.rebuild_index(storage)
-                    st.success(f"✅ {count} Dokumente indexiert")
+        # Hole backup_stats hier (falls nicht schon definiert)
+        backup_stats = backup_mgr.get_statistics()
 
-with tab3:
-    st.subheader("📌 Wiedervorlage-System")
-
-    wv = st.session_state.wiedervorlage_system
-
-    # Neue Wiedervorlage
-    with st.expander("➕ Neue Wiedervorlage erstellen"):
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
 
         with col1:
-            wv_titel = st.text_input("Titel:")
-            wv_aktenzeichen = st.text_input("Aktenzeichen (optional):")
-            wv_sb = st.text_input("Sachbearbeiter (optional):")
+            st.metric("Total Backups", backup_stats['total_backups'])
 
         with col2:
-            wv_datum = st.date_input("Wiedervorlage-Datum:")
-            wv_priority = st.selectbox("Priorität:", ["NORMAL", "MEDIUM", "HIGH", "CRITICAL"])
-            wv_notiz = st.text_area("Notiz:")
+            storage_stats = dashboard_mgr.get_storage_stats()
+            st.metric("Storage (MB)", f"{storage_stats['total_size_mb']:.1f}")
 
-        if st.button("💾 Wiedervorlage anlegen", type="primary"):
-            from datetime import datetime
-            wv_id = wv.create_wiedervorlage(
-                titel=wv_titel,
-                datum=datetime.combine(wv_datum, datetime.min.time()),
-                aktenzeichen=wv_aktenzeichen if wv_aktenzeichen else None,
-                sachbearbeiter=wv_sb if wv_sb else None,
-                notiz=wv_notiz,
-                priority=wv_priority
-            )
-            st.success(f"✅ Wiedervorlage erstellt (ID: {wv_id[:8]}...)")
+        with col3:
+            st.metric("PDF-Dateien", storage_stats['pdf_count'])
 
-    # Fällige Wiedervorlagen
+    # Info-Box
     st.markdown("---")
-    st.subheader("⚠️ Fällige Wiedervorlagen")
-
-    faellig = wv.get_faellige_wiedervorlagen(tage_vorher=7)
-
-    if faellig:
-        for item in faellig:
-            color = "🔴" if item['is_overdue'] else ("🟠" if item['days_remaining'] <= 3 else "🟡")
-
-            with st.expander(f"{color} {item['titel']} ({item['datum'][:10]})"):
-                st.write(f"**Aktenzeichen:** {item['aktenzeichen']}")
-                st.write(f"**Sachbearbeiter:** {item['sachbearbeiter']}")
-                st.write(f"**Priorität:** {item['priority']}")
-                st.write(f"**Verbleibende Tage:** {item['days_remaining']}")
-                st.write(f"**Notiz:** {item['notiz']}")
-
-                col1, col2, col3 = st.columns(3)
-
-                with col1:
-                    if st.button("✅ Erledigt", key=f"done_{item['id']}"):
-                        wv.mark_erledigt(item['id'])
-                        st.rerun()
-
-                with col2:
-                    if st.button("📅 Verschieben", key=f"move_{item['id']}"):
-                        # Session-State für Modal-Dialog
-                        st.session_state[f"move_dialog_{item['id']}"] = True
-
-                # Verschieben-Dialog (außerhalb der Spalten)
-                if st.session_state.get(f"move_dialog_{item['id']}", False):
-                    with st.form(key=f"move_form_{item['id']}"):
-                        st.markdown("#### 📅 Wiedervorlage verschieben")
-                        from datetime import datetime, timedelta
-
-                        # Aktuelles Datum
-                        current_date = datetime.fromisoformat(item['datum'][:10])
-
-                        # Neues Datum
-                        new_date = st.date_input(
-                            "Neues Datum:",
-                            value=current_date + timedelta(days=7),
-                            min_value=datetime.now().date()
-                        )
-
-                        # Notiz hinzufügen
-                        move_note = st.text_area("Grund für Verschiebung (optional):", key=f"note_{item['id']}")
-
-                        col_btn1, col_btn2 = st.columns(2)
-
-                        with col_btn1:
-                            if st.form_submit_button("✅ Verschieben", type="primary"):
-                                # Aktualisiere Datum
-                                wv.update_wiedervorlage(item['id'], {'datum': datetime.combine(new_date, datetime.min.time()).isoformat()})
-
-                                # Füge Notiz hinzu wenn vorhanden
-                                if move_note:
-                                    current_notiz = item.get('notiz', '')
-                                    updated_notiz = f"{current_notiz}\n\n[Verschoben am {datetime.now().strftime('%Y-%m-%d')}]: {move_note}"
-                                    wv.update_wiedervorlage(item['id'], {'notiz': updated_notiz})
-
-                                st.session_state[f"move_dialog_{item['id']}"] = False
-                                st.success(f"✅ Wiedervorlage auf {new_date} verschoben!")
-                                st.rerun()
-
-                        with col_btn2:
-                            if st.form_submit_button("❌ Abbrechen"):
-                                st.session_state[f"move_dialog_{item['id']}"] = False
-                                st.rerun()
-
-                with col3:
-                    if st.button("🗑️ Löschen", key=f"del_{item['id']}"):
-                        wv.delete(item['id'])
-                        st.rerun()
-    else:
-        st.success("✅ Keine fälligen Wiedervorlagen")
-
-with tab4:
-    st.subheader("📧 Email-Import (IMAP)")
-
-    email_imp = st.session_state.email_importer
-
-    # Konfiguration
-    with st.expander("⚙️ IMAP-Konfiguration"):
-        col1, col2 = st.columns(2)
-
-        with col1:
-            imap_server = st.text_input("IMAP-Server:", value="imap.gmail.com", key="email_import_imap_server")
-            imap_username = st.text_input("Email:", key="email_import_username")
-
-        with col2:
-            imap_port = st.number_input("Port:", value=993, key="email_import_port")
-            imap_password = st.text_input("Passwort:", type="password", key="email_import_password")
-
-        if st.button("💾 IMAP Konfigurieren"):
-            email_imp.configure(imap_server, imap_username, imap_password, imap_port)
-            st.success("✅ IMAP konfiguriert")
-
-        # Test
-        if email_imp.is_enabled():
-            if st.button("🔌 Verbindung testen"):
-                success, message = email_imp.test_connection()
-                if success:
-                    st.success(message)
-                else:
-                    st.error(message)
-
-    # Import
-    st.markdown("---")
-
-    if email_imp.is_enabled():
-        if st.button("📥 PDFs aus Emails importieren", type="primary"):
-            with st.spinner("Rufe Emails ab..."):
-                emails = email_imp.fetch_emails_with_pdfs()
-
-                if emails:
-                    st.success(f"✅ {len(emails)} Email(s) mit PDFs gefunden")
-
-                    for email_data in emails:
-                        with st.expander(f"📧 {email_data['subject']} ({len(email_data['pdfs'])} PDF(s))"):
-                            st.write(f"**Von:** {email_data['from']}")
-                            st.write(f"**Datum:** {email_data['date']}")
-
-                            for pdf in email_data['pdfs']:
-                                st.write(f"- {pdf['filename']} ({pdf['size'] / 1024:.1f} KB)")
-
-                            if st.button(f"✅ Verarbeiten", key=f"process_{email_data['email_id']}"):
-                                # Speichere PDFs zur Session für Verarbeitung
-                                import tempfile
-                                from pathlib import Path
-
-                                # Erstelle temporäre Dateien für PDFs
-                                if 'email_import_pdfs' not in st.session_state:
-                                    st.session_state.email_import_pdfs = []
-
-                                for pdf in email_data['pdfs']:
-                                    st.session_state.email_import_pdfs.append({
-                                        'name': pdf['filename'],
-                                        'bytes': pdf['data'],
-                                        'from': email_data['from'],
-                                        'subject': email_data['subject']
-                                    })
-
-                                # Markiere Email als verarbeitet
-                                email_imp.mark_email_as_processed(email_data['email_id'])
-
-                                st.success(f"✅ {len(email_data['pdfs'])} PDF(s) importiert und zur Verarbeitung bereitgestellt!")
-                                st.info("📋 **Hinweis:** Die importierten PDFs stehen jetzt im Post-Eingang zur Verarbeitung bereit.")
-                                st.info("💡 **Tipp:** Wechseln Sie zum Tab 'Post-Eingang' und laden Sie die PDFs dort hoch.")
-                else:
-                    st.info("Keine neuen Emails mit PDFs gefunden")
-    else:
-        st.warning("⚠️ IMAP noch nicht konfiguriert")
-
-with tab5:
-    st.subheader("📁 Hot Folder & Automatische Ablage")
-
-    # Hot Folder
-    st.markdown("### 🔥 Hot Folder Überwachung")
-
-    with st.expander("⚙️ Hot Folder konfigurieren"):
-        hot_folder_path = st.text_input("Überwachtes Verzeichnis:", value="./hot_folder")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            if st.button("▶️ Hot Folder starten", type="primary"):
-                from pathlib import Path
-
-                watcher = HotFolderWatcher(Path(hot_folder_path))
-                watcher.start()
-                st.session_state.hot_folder_watcher = watcher
-                st.success(f"✅ Hot Folder gestartet: {hot_folder_path}")
-
-        with col2:
-            if st.session_state.hot_folder_watcher:
-                if st.button("⏸️ Hot Folder stoppen"):
-                    st.session_state.hot_folder_watcher.stop()
-                    st.session_state.hot_folder_watcher = None
-                    st.success("✅ Hot Folder gestoppt")
-
-    # Auto-Ablage
-    st.markdown("---")
-    st.markdown("### ☁️ Automatische Ablage")
-
-    auto_storage = st.session_state.auto_file_storage
-
-    with st.expander("⚙️ Auto-Ablage konfigurieren"):
-        storage_type = st.selectbox("Storage-Typ:", ["Lokal", "Netzlaufwerk", "Dropbox", "Google Drive"])
-        base_path = st.text_input("Basis-Pfad:", value="./ablage")
-
-        if st.button("💾 Auto-Ablage aktivieren"):
-            auto_storage.enable(base_path, storage_type)
-            st.success("✅ Auto-Ablage aktiviert")
-
-        # Test
-        if auto_storage.is_enabled():
-            if st.button("🔌 Verbindung testen"):
-                success, message = auto_storage.test_connection()
-                if success:
-                    st.success(message)
-                else:
-                    st.error(message)
-
-with tab6:
-    st.subheader("🔔 Benachrichtigungen & Kalender")
-
-    notif_mgr = st.session_state.notification_manager
-    cal_int = st.session_state.calendar_integration
-
-    # Benachrichtigungen
-    st.markdown("### 📧 Email-Benachrichtigungen")
-
-    with st.expander("⚙️ Email konfigurieren"):
-        col1, col2 = st.columns(2)
-
-        with col1:
-            smtp_server = st.text_input("SMTP-Server:", value="smtp.gmail.com", key="notif_smtp_server")
-            smtp_port = st.number_input("SMTP-Port:", value=587, key="notif_smtp_port")
-            smtp_user = st.text_input("Benutzername:", key="notif_smtp_user")
-
-        with col2:
-            smtp_pass = st.text_input("Passwort:", type="password", key="notif_smtp_pass")
-            email_from = st.text_input("Absender-Email:", key="notif_email_from")
-            recipients = st.text_input("Empfänger (kommagetrennt):", key="notif_recipients")
-
-        if st.button("💾 Email-Benachrichtigungen konfigurieren"):
-            recipient_list = [r.strip() for r in recipients.split(',')]
-            notif_mgr.configure_email(smtp_server, smtp_port, smtp_user, smtp_pass, email_from, recipient_list)
-            st.success("✅ Email-Benachrichtigungen konfiguriert")
-
-        if notif_mgr.config.get('email_enabled'):
-            if st.button("🔌 Email-Verbindung testen"):
-                success, message = notif_mgr.test_email_connection()
-                if success:
-                    st.success(message)
-                else:
-                    st.error(message)
-
-    # Kalender
-    st.markdown("---")
-    st.markdown("### 📅 Kalender-Integration")
-
-    with st.expander("⚙️ Kalender konfigurieren"):
-        cal_type = st.selectbox("Kalender-Typ:", ["Outlook/Exchange", "Google Calendar"])
-
-        if cal_type == "Outlook/Exchange":
-            client_id = st.text_input("Client ID:")
-            client_secret = st.text_input("Client Secret:", type="password")
-            tenant_id = st.text_input("Tenant ID:")
-
-            if st.button("💾 Outlook konfigurieren"):
-                cal_int.configure_outlook(client_id, client_secret, tenant_id)
-                st.success("✅ Outlook konfiguriert")
-
-        else:  # Google Calendar
-            creds_path = st.text_input("Credentials JSON Pfad:")
-
-            if st.button("💾 Google Calendar konfigurieren"):
-                cal_int.configure_google(creds_path)
-                st.success("✅ Google Calendar konfiguriert")
-
-        if cal_int.is_enabled():
-            if st.button("🔌 Kalender-Verbindung testen"):
-                success, message = cal_int.test_connection()
-                if success:
-                    st.success(message)
-                else:
-                    st.error(message)
-
-with tab7:
-    st.subheader("⚙️ System & Backup")
-
-    backup_mgr = st.session_state.backup_manager
-
-    # Backup-Einstellungen
-    st.markdown("### 💾 Backup-Verwaltung")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        backup_enabled = st.checkbox("Automatische Backups aktivieren", value=backup_mgr.is_enabled())
-
-        if backup_enabled != backup_mgr.is_enabled():
-            if backup_enabled:
-                backup_mgr.enable()
-                st.success("✅ Backups aktiviert")
-            else:
-                backup_mgr.disable()
-                st.info("⏸️ Backups deaktiviert")
-
-    with col2:
-        if st.button("💾 Backup jetzt erstellen", type="primary"):
-            with st.spinner("Erstelle Backup..."):
-                backup_path = backup_mgr.create_backup()
-                if backup_path:
-                    st.success(f"✅ Backup erstellt: {backup_path.name}")
-                else:
-                    st.error("❌ Backup fehlgeschlagen")
-
-    # Backup-Liste
-    st.markdown("---")
-    st.subheader("📦 Vorhandene Backups")
-
-    backups = backup_mgr.list_backups()
-
-    if backups:
-        for backup in backups:
-            with st.expander(f"📦 {backup['name']} ({backup['size_mb']:.1f} MB)"):
-                st.write(f"**Erstellt:** {backup['created']}")
-                st.write(f"**Alter:** {backup['age_days']} Tage")
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    if st.button("🔄 Wiederherstellen", key=f"restore_{backup['name']}"):
-                        if backup_mgr.restore_backup(Path(backup['path'])):
-                            st.success("✅ Wiederhergestellt")
-                        else:
-                            st.error("❌ Fehler")
-
-                with col2:
-                    if st.button("🗑️ Löschen", key=f"del_backup_{backup['name']}"):
-                        if backup_mgr.delete_backup(backup['name']):
-                            st.success("✅ Gelöscht")
-                            st.rerun()
-    else:
-        st.info("Noch keine Backups vorhanden")
-
-    # Statistiken
-    st.markdown("---")
-    st.subheader("📊 System-Statistiken")
-
-    # Hole backup_stats hier (falls nicht schon definiert)
-    backup_stats = backup_mgr.get_statistics()
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.metric("Total Backups", backup_stats['total_backups'])
-
-    with col2:
-        storage_stats = dashboard_mgr.get_storage_stats()
-        st.metric("Storage (MB)", f"{storage_stats['total_size_mb']:.1f}")
-
-    with col3:
-        st.metric("PDF-Dateien", storage_stats['pdf_count'])
-
-# Info-Box
-st.markdown("---")
-with st.expander("ℹ️ Anleitung"):
-    st.markdown("""
-    ### So funktioniert die App:
-
-    1. **API Key eingeben** (OpenAI, Claude oder Gemini)
-    2. **Tagespost-PDF hochladen** (OCR-Version)
-    3. **Aktenregister-Excel hochladen** (aktenregister.xlsx)
-    4. **"Verarbeitung starten" klicken**
-    5. **Batch-Modus nutzen** (optional):
-       - **"Weitere Datei einlesen"** → Nächstes PDF-Paket hinzufügen
-       - **"Postscan beenden"** → Alle Batches zu ZIP-Dateien packen
-    6. **ZIP-Dateien herunterladen** (eine pro Sachbearbeiter)
-
-    ### Batch-Processing (NEU):
-    Sie können mehrere Post-Pakete nacheinander einscannen:
-    - 1. PDF hochladen und verarbeiten
-    - **"Weitere Datei einlesen"** klicken
-    - 2. PDF hochladen und verarbeiten
-    - Beliebig wiederholen...
-    - **"Postscan beenden"** → Alle Dokumente werden zusammen gepackt
-
-    ### Die App erstellt:
-    - ZIP-Dateien pro Sachbearbeiter (SQ, TS, M, FÜ, CV, nicht-zugeordnet)
-    - Einzelne PDFs mit erkannten Aktenzeichen im Dateinamen
-    - Excel-Dateien mit Fristen und Metadaten
-    - Gesamt-Excel mit allen Dokumenten
-
-    ### Aktenzeichen-Erkennung:
-    - Interne Kanzlei-Aktenzeichen (z.B. 151/25M, 1179/24TS)
-    - "Ihr Zeichen" / "Unser Zeichen" - Felder haben höchste Priorität
-    - Externe Aktenzeichen (Gerichte, Versicherungen)
-    - Automatische Zuordnung über Aktenregister
-    - **KI-gestütztes Lernen** aus manuellen Zuordnungen
-    """)
+    with st.expander("ℹ️ Anleitung"):
+        st.markdown("""
+        ### So funktioniert die App:
+
+        1. **API Key eingeben** (OpenAI, Claude oder Gemini)
+        2. **Tagespost-PDF hochladen** (OCR-Version)
+        3. **Aktenregister-Excel hochladen** (aktenregister.xlsx)
+        4. **"Verarbeitung starten" klicken**
+        5. **Batch-Modus nutzen** (optional):
+           - **"Weitere Datei einlesen"** → Nächstes PDF-Paket hinzufügen
+           - **"Postscan beenden"** → Alle Batches zu ZIP-Dateien packen
+        6. **ZIP-Dateien herunterladen** (eine pro Sachbearbeiter)
+
+        ### Batch-Processing (NEU):
+        Sie können mehrere Post-Pakete nacheinander einscannen:
+        - 1. PDF hochladen und verarbeiten
+        - **"Weitere Datei einlesen"** klicken
+        - 2. PDF hochladen und verarbeiten
+        - Beliebig wiederholen...
+        - **"Postscan beenden"** → Alle Dokumente werden zusammen gepackt
+
+        ### Die App erstellt:
+        - ZIP-Dateien pro Sachbearbeiter (SQ, TS, M, FÜ, CV, nicht-zugeordnet)
+        - Einzelne PDFs mit erkannten Aktenzeichen im Dateinamen
+        - Excel-Dateien mit Fristen und Metadaten
+        - Gesamt-Excel mit allen Dokumenten
+
+        ### Aktenzeichen-Erkennung:
+        - Interne Kanzlei-Aktenzeichen (z.B. 151/25M, 1179/24TS)
+        - "Ihr Zeichen" / "Unser Zeichen" - Felder haben höchste Priorität
+        - Externe Aktenzeichen (Gerichte, Versicherungen)
+        - Automatische Zuordnung über Aktenregister
+        - **KI-gestütztes Lernen** aus manuellen Zuordnungen
+        """)
