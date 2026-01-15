@@ -1332,203 +1332,371 @@ if current_user['role'] in ['Administrator', 'Empfang']:
     st.markdown("---")
 
 # ============================================================================
-# DASHBOARD EMPFANG (Einfach) - Nur für Empfang/Admin
+# DASHBOARD EMPFANG - Vereinfachtes 3-Schritte-Dashboard
 # ============================================================================
 if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl == "Dashboard Empfang (Einfach)":
-    st.header("📬 Dashboard Empfang")
-    st.caption("Einfache Posteingangsverarbeitung: PDF hochladen, verarbeiten, herunterladen oder versenden")
 
-    # 1. API Key Status - Prüfe zuerst Streamlit Secrets
-    if current_api_key:
-        if key_from_secrets:
-            st.success(f"🔐 **{api_provider} API-Key ist aus Streamlit Secrets hinterlegt** - Bereit zur Verarbeitung!")
-        else:
-            st.success(f"✅ {api_provider} API-Key ist konfiguriert")
-    else:
-        st.warning(f"⚠️ Bitte {api_provider} API-Key in der Sidebar eingeben")
+    # CSS für Ampeln und Schritte
+    st.markdown("""
+    <style>
+    .step-container {
+        border: 2px solid #ddd;
+        border-radius: 15px;
+        padding: 20px;
+        margin: 10px 0;
+        background: #fafafa;
+    }
+    .step-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 15px;
+    }
+    .step-number {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 1.2em;
+        margin-right: 15px;
+        color: white;
+    }
+    .step-title {
+        font-size: 1.3em;
+        font-weight: bold;
+    }
+    .ampel {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-left: 10px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.3);
+    }
+    .ampel-rot { background: #dc3545; box-shadow: 0 0 15px #dc3545; }
+    .ampel-orange { background: #fd7e14; box-shadow: 0 0 15px #fd7e14; }
+    .ampel-gruen { background: #28a745; box-shadow: 0 0 15px #28a745; }
+    .fertig-banner {
+        text-align: center;
+        padding: 30px;
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        border-radius: 15px;
+        margin: 20px 0;
+        animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4); }
+        70% { box-shadow: 0 0 0 20px rgba(40, 167, 69, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.header("📬 Posteingang - Empfang")
+
+    # API Key prüfen (im Hintergrund)
+    if not current_api_key:
+        st.error("⚠️ API-Key nicht konfiguriert! Bitte in der Sidebar eingeben.")
         st.stop()
 
-    col_emp1, col_emp2 = st.columns([1, 1], gap="medium")
+    # =========================================================================
+    # SCHRITT 1: AKTENREGISTER
+    # =========================================================================
+    aktenregister_vorhanden = storage.has_aktenregister()
 
-    with col_emp1:
-        st.subheader("📄 Posteingang hochladen")
-        empfang_pdfs = st.file_uploader(
-            "PDF-Dateien mit Tagespost (OCR) - mehrere möglich",
-            type=["pdf"],
-            accept_multiple_files=True,
-            key="empfang_simple_pdf",
-            help="Laden Sie eine oder mehrere OCR-PDF-Dateien hoch"
-        )
-        # Speichere Upload-Metadaten
-        if empfang_pdfs:
-            st.session_state.empfang_upload_name = empfang_pdfs[0].name if empfang_pdfs else ""
-            st.session_state.empfang_upload_time = datetime.now()
+    if aktenregister_vorhanden:
+        stats = storage.get_aktenregister_stats()
+        dt = datetime.fromtimestamp(stats['last_modified'])
+        formatted_date = dt.strftime('%d.%m.%Y %H:%M')
+        ampel_1 = "ampel-gruen"
+        step_bg_1 = "#d4edda"
+    else:
+        stats = None
+        formatted_date = "-"
+        ampel_1 = "ampel-rot"
+        step_bg_1 = "#f8d7da"
 
-    with col_emp2:
-        st.subheader("📊 Aktenregister hochladen")
-        if storage.has_aktenregister():
-            stats = storage.get_aktenregister_stats()
-            dt = datetime.fromtimestamp(stats['last_modified'])
-            formatted = dt.strftime('%d.%m.%Y %H:%M')
-            st.success(f"💾 Gespeichertes Register: {stats['count']} Akten\n\n*Zuletzt aktualisiert: {formatted}*")
+    st.markdown(f"""
+    <div class="step-container" style="background: {step_bg_1}; border-color: {'#28a745' if aktenregister_vorhanden else '#dc3545'};">
+        <div class="step-header">
+            <div class="step-number" style="background: {'#28a745' if aktenregister_vorhanden else '#dc3545'};">1</div>
+            <span class="step-title">Aktenregister</span>
+            <span class="ampel {ampel_1}"></span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col1_1, col1_2 = st.columns([2, 1])
+    with col1_1:
+        if aktenregister_vorhanden:
+            st.success(f"✅ **{stats['count']} Akten** geladen | Stand: {formatted_date}")
+        else:
+            st.error("❌ Kein Aktenregister vorhanden")
 
         empfang_excel = st.file_uploader(
-            "Aktenregister (.xlsx)",
+            "Aktenregister hochladen (.xlsx)" if not aktenregister_vorhanden else "Neues Register hochladen (optional)",
             type=["xlsx"],
-            key="empfang_simple_excel"
+            key="empfang_step1_excel",
+            help="Excel-Datei mit Blatt 'akten'"
         )
 
-    # Verarbeitung
-    if empfang_pdfs:
-        if st.button("🚀 Verarbeitung starten", type="primary", key="empfang_simple_start"):
-            # Speichere Excel falls hochgeladen
-            if empfang_excel:
-                import pandas as pd
-                # Lese Excel und speichere im Storage
-                new_df = pd.read_excel(
-                    BytesIO(empfang_excel.read()),
-                    sheet_name='akten',
-                    header=1
-                )
-                storage.save_aktenregister(new_df, merge=storage.has_aktenregister())
-
-            if not storage.has_aktenregister():
-                st.error("❌ Bitte zuerst Aktenregister hochladen!")
-                st.stop()
-
-            with st.spinner("📄 Verarbeite Posteingang..."):
+        if empfang_excel:
+            if st.button("📊 Register speichern", key="save_register_btn"):
                 try:
-                    import tempfile
-                    from pdf_processor import PDFProcessor
-                    from document_analyzer import DocumentAnalyzer
-                    from excel_generator import ExcelGenerator
-                    from training_database import TrainingDatabase
-
-                    alle_daten = []
-                    sachbearbeiter_stats = {}
-
-                    # Verarbeite alle PDFs
-                    total_pdfs = len(empfang_pdfs)
-                    for pdf_idx, empfang_pdf in enumerate(empfang_pdfs):
-                        if total_pdfs > 1:
-                            st.info(f"📄 Verarbeite PDF {pdf_idx + 1}/{total_pdfs}: {empfang_pdf.name}")
-
-                        pdf_bytes = empfang_pdf.getvalue()
-
-                        # Speichere PDF temporär
-                        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
-                            tmp.write(pdf_bytes)
-                            pdf_path = tmp.name
-
-                        excel_path = storage.aktenregister_file
-                        erkenner = AktenzeichenErkenner(excel_path, storage=storage)
-
-                        processor = PDFProcessor(pdf_path, debug=False, trennmodus="Text 'Trennseite'", excel_path=excel_path)
-                        dokumente, _ = processor.verarbeite_pdf()
-
-                        training_db = TrainingDatabase(storage.storage_dir)
-                        analyzer = DocumentAnalyzer(current_api_key, api_provider=api_provider, training_db=training_db)
-
-                        progress = st.progress(0)
-                        for i, doc in enumerate(dokumente):
-                            progress.progress((i + 1) / len(dokumente))
-
-                            akt_info = erkenner.erkenne_aktenzeichen(doc['text'])
-                            sb_aus_text = erkenner.erkenne_sachbearbeiter_aus_text(doc['text'])
-                            analyse = analyzer.analysiere_dokument(doc['text'], akt_info)
-                            sb = erkenner.ermittle_sachbearbeiter(akt_info, analyse, sachbearbeiter_aus_text=sb_aus_text)
-                            sachbearbeiter_stats[sb] = sachbearbeiter_stats.get(sb, 0) + 1
-
-                            dateiname = erkenner.generiere_dateiname(
-                                akt_info.get('internes_az'),
-                                analyse.get('mandant'),
-                                analyse.get('gegner'),
-                                analyse.get('datum'),
-                                analyse.get('stichworte', []),
-                                aktenkurzbezeichnung=akt_info.get('aktenkurzbezeichnung')
-                            )
-
-                            alle_daten.append({
-                                'dokument': doc,
-                                'aktenzeichen_info': akt_info,
-                                'analyse': analyse,
-                                'sachbearbeiter': sb,
-                                'dateiname': dateiname
-                            })
-
-                    # ZIP-Dateien erstellen mit erweitertem Dateinamen
-                    scanner_name = _extract_scanner_name(st.session_state.get('empfang_upload_name', ''))
-                    scan_datum = st.session_state.get('empfang_upload_time', datetime.now()).strftime('%Y-%m-%d')
-
-                    zip_dateien = {}
-                    excel_gen = ExcelGenerator()
-
-                    with tempfile.TemporaryDirectory() as temp_dir:
-                        temp_path = Path(temp_dir)
-                        excel_dateien = excel_gen.erstelle_excel_dateien(alle_daten, temp_path)
-
-                        for sb, count in sachbearbeiter_stats.items():
-                            if count > 0:
-                                zip_buffer = BytesIO()
-                                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                                    for daten in alle_daten:
-                                        if daten['sachbearbeiter'] == sb:
-                                            pdf_content = daten['dokument']['pdf_bytes']
-                                            zipf.writestr(daten['dateiname'], pdf_content)
-                                    if sb in excel_dateien:
-                                        zipf.writestr(f"{sb}_Fristen.xlsx", excel_dateien[sb])
-                                zip_dateien[sb] = zip_buffer.getvalue()
-
-                    # Speichere Ergebnisse
-                    st.session_state.empfang_simple_ergebnisse = {
-                        'zip_dateien': zip_dateien,
-                        'sachbearbeiter_stats': sachbearbeiter_stats,
-                        'scanner_name': scanner_name,
-                        'scan_datum': scan_datum
-                    }
-                    st.session_state.empfang_simple_done = True
+                    import pandas as pd
+                    new_df = pd.read_excel(
+                        BytesIO(empfang_excel.read()),
+                        sheet_name='akten',
+                        header=1
+                    )
+                    storage.save_aktenregister(new_df, merge=storage.has_aktenregister())
+                    st.success("✅ Aktenregister gespeichert!")
                     st.rerun()
-
                 except Exception as e:
-                    st.error(f"❌ Fehler: {str(e)}")
-                    st.exception(e)
+                    st.error(f"❌ Fehler: {e}")
 
-    # Ergebnisse anzeigen
-    if st.session_state.get('empfang_simple_done', False) and 'empfang_simple_ergebnisse' in st.session_state:
+    st.markdown("---")
+
+    # =========================================================================
+    # SCHRITT 2: POSTEINGANG UPLOAD & VERARBEITUNG
+    # =========================================================================
+    # Status ermitteln
+    empfang_pdfs = st.session_state.get('empfang_uploaded_files', [])
+    verarbeitung_done = st.session_state.get('empfang_simple_done', False)
+
+    if verarbeitung_done:
+        ampel_2 = "ampel-gruen"
+        step_bg_2 = "#d4edda"
+        status_text = "Verarbeitung abgeschlossen"
+    elif empfang_pdfs:
+        ampel_2 = "ampel-orange"
+        step_bg_2 = "#fff3cd"
+        status_text = f"{len(empfang_pdfs)} Datei(en) bereit"
+    else:
+        ampel_2 = "ampel-rot"
+        step_bg_2 = "#f8d7da"
+        status_text = "Keine Dateien"
+
+    st.markdown(f"""
+    <div class="step-container" style="background: {step_bg_2}; border-color: {'#28a745' if verarbeitung_done else '#fd7e14' if empfang_pdfs else '#dc3545'};">
+        <div class="step-header">
+            <div class="step-number" style="background: {'#28a745' if verarbeitung_done else '#fd7e14' if empfang_pdfs else '#dc3545'};">2</div>
+            <span class="step-title">Posteingang verarbeiten</span>
+            <span class="ampel {ampel_2}"></span>
+            <span style="margin-left: 15px; color: #666;">({status_text})</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not verarbeitung_done:
+        # Upload-Bereich
+        uploaded_files = st.file_uploader(
+            "PDF-Dateien hochladen (Drag & Drop möglich)",
+            type=["pdf"],
+            accept_multiple_files=True,
+            key="empfang_step2_upload",
+            help="Laden Sie eine oder mehrere PDF-Dateien hoch"
+        )
+
+        if uploaded_files:
+            st.session_state.empfang_uploaded_files = uploaded_files
+            st.info(f"📄 **{len(uploaded_files)} Datei(en)** bereit zur Verarbeitung")
+
+            # Dateiliste anzeigen
+            with st.expander("📋 Hochgeladene Dateien"):
+                for f in uploaded_files:
+                    st.text(f"• {f.name} ({f.size / 1024:.1f} KB)")
+
+        # Verarbeitung starten
+        can_process = uploaded_files and aktenregister_vorhanden
+
+        col2_1, col2_2 = st.columns([2, 1])
+        with col2_1:
+            if st.button(
+                "🚀 Verarbeitung starten",
+                type="primary",
+                disabled=not can_process,
+                key="start_processing_btn",
+                use_container_width=True
+            ):
+                if not aktenregister_vorhanden:
+                    st.error("❌ Bitte zuerst Aktenregister hochladen (Schritt 1)!")
+                else:
+                    # Verarbeitung durchführen
+                    progress_container = st.container()
+                    with progress_container:
+                        try:
+                            import tempfile
+                            from pdf_processor import PDFProcessor
+                            from document_analyzer import DocumentAnalyzer
+                            from excel_generator import ExcelGenerator
+                            from training_database import TrainingDatabase
+
+                            alle_daten = []
+                            sachbearbeiter_stats = {}
+
+                            # Speichere Upload-Metadaten
+                            st.session_state.empfang_upload_name = uploaded_files[0].name if uploaded_files else ""
+                            st.session_state.empfang_upload_time = datetime.now()
+
+                            total_pdfs = len(uploaded_files)
+                            overall_progress = st.progress(0, text="Starte Verarbeitung...")
+
+                            for pdf_idx, empfang_pdf in enumerate(uploaded_files):
+                                overall_progress.progress(
+                                    (pdf_idx) / total_pdfs,
+                                    text=f"📄 Verarbeite {pdf_idx + 1}/{total_pdfs}: {empfang_pdf.name}"
+                                )
+
+                                pdf_bytes = empfang_pdf.getvalue()
+
+                                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                                    tmp.write(pdf_bytes)
+                                    pdf_path = tmp.name
+
+                                excel_path = storage.aktenregister_file
+                                erkenner = AktenzeichenErkenner(excel_path, storage=storage)
+
+                                processor = PDFProcessor(pdf_path, debug=False, trennmodus="Text 'Trennseite'", excel_path=excel_path)
+                                dokumente, _ = processor.verarbeite_pdf()
+
+                                training_db = TrainingDatabase(storage.storage_dir)
+                                analyzer = DocumentAnalyzer(current_api_key, api_provider=api_provider, training_db=training_db)
+
+                                for i, doc in enumerate(dokumente):
+                                    overall_progress.progress(
+                                        (pdf_idx + (i + 1) / len(dokumente)) / total_pdfs,
+                                        text=f"📄 {empfang_pdf.name}: Dokument {i + 1}/{len(dokumente)}"
+                                    )
+
+                                    akt_info = erkenner.erkenne_aktenzeichen(doc['text'])
+                                    sb_aus_text = erkenner.erkenne_sachbearbeiter_aus_text(doc['text'])
+                                    analyse = analyzer.analysiere_dokument(doc['text'], akt_info)
+                                    sb = erkenner.ermittle_sachbearbeiter(akt_info, analyse, sachbearbeiter_aus_text=sb_aus_text)
+                                    sachbearbeiter_stats[sb] = sachbearbeiter_stats.get(sb, 0) + 1
+
+                                    dateiname = erkenner.generiere_dateiname(
+                                        akt_info.get('internes_az'),
+                                        analyse.get('mandant'),
+                                        analyse.get('gegner'),
+                                        analyse.get('datum'),
+                                        analyse.get('stichworte', []),
+                                        aktenkurzbezeichnung=akt_info.get('aktenkurzbezeichnung')
+                                    )
+
+                                    alle_daten.append({
+                                        'dokument': doc,
+                                        'aktenzeichen_info': akt_info,
+                                        'analyse': analyse,
+                                        'sachbearbeiter': sb,
+                                        'dateiname': dateiname
+                                    })
+
+                            overall_progress.progress(0.95, text="📦 Erstelle ZIP-Dateien...")
+
+                            # ZIP-Dateien erstellen
+                            scanner_name = _extract_scanner_name(st.session_state.get('empfang_upload_name', ''))
+                            scan_datum = st.session_state.get('empfang_upload_time', datetime.now()).strftime('%Y-%m-%d')
+
+                            zip_dateien = {}
+                            excel_gen = ExcelGenerator()
+
+                            with tempfile.TemporaryDirectory() as temp_dir:
+                                temp_path = Path(temp_dir)
+                                excel_dateien = excel_gen.erstelle_excel_dateien(alle_daten, temp_path)
+
+                                for sb, count in sachbearbeiter_stats.items():
+                                    if count > 0:
+                                        zip_buffer = BytesIO()
+                                        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                                            for daten in alle_daten:
+                                                if daten['sachbearbeiter'] == sb:
+                                                    pdf_content = daten['dokument']['pdf_bytes']
+                                                    zipf.writestr(daten['dateiname'], pdf_content)
+                                            if sb in excel_dateien:
+                                                zipf.writestr(f"{sb}_Fristen.xlsx", excel_dateien[sb])
+                                        zip_dateien[sb] = zip_buffer.getvalue()
+
+                            overall_progress.progress(1.0, text="✅ Fertig!")
+
+                            # Speichere Ergebnisse
+                            st.session_state.empfang_simple_ergebnisse = {
+                                'zip_dateien': zip_dateien,
+                                'sachbearbeiter_stats': sachbearbeiter_stats,
+                                'scanner_name': scanner_name,
+                                'scan_datum': scan_datum,
+                                'total_docs': sum(sachbearbeiter_stats.values())
+                            }
+                            st.session_state.empfang_simple_done = True
+                            st.rerun()
+
+                        except Exception as e:
+                            st.error(f"❌ Fehler bei der Verarbeitung: {str(e)}")
+                            import traceback
+                            with st.expander("🔍 Technische Details"):
+                                st.code(traceback.format_exc())
+
+        with col2_2:
+            if not can_process:
+                if not aktenregister_vorhanden:
+                    st.warning("⬆️ Erst Schritt 1")
+                elif not uploaded_files:
+                    st.info("📄 PDFs hochladen")
+
+    st.markdown("---")
+
+    # =========================================================================
+    # SCHRITT 3: BEREITSTELLUNG (Download & Email)
+    # =========================================================================
+    if verarbeitung_done:
+        ampel_3 = "ampel-gruen"
+        step_bg_3 = "#d4edda"
+    else:
+        ampel_3 = "ampel-rot"
+        step_bg_3 = "#f8d7da"
+
+    st.markdown(f"""
+    <div class="step-container" style="background: {step_bg_3}; border-color: {'#28a745' if verarbeitung_done else '#dc3545'};">
+        <div class="step-header">
+            <div class="step-number" style="background: {'#28a745' if verarbeitung_done else '#dc3545'};">3</div>
+            <span class="step-title">Bereitstellung & Versand</span>
+            <span class="ampel {ampel_3}"></span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if verarbeitung_done and 'empfang_simple_ergebnisse' in st.session_state:
         ergebnisse = st.session_state.empfang_simple_ergebnisse
         scanner_name = ergebnisse.get('scanner_name', '')
         scan_datum = ergebnisse.get('scan_datum', '')
-        total_docs = sum(ergebnisse['sachbearbeiter_stats'].values())
+        total_docs = ergebnisse.get('total_docs', sum(ergebnisse['sachbearbeiter_stats'].values()))
 
-        # =====================================================================
-        # FERTIG! - Große Erfolgsanzeige
-        # =====================================================================
-        st.markdown("---")
+        # FERTIG! Banner
         st.markdown(f"""
-        <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #28a745 0%, #20c997 100%); border-radius: 10px; margin: 10px 0;">
+        <div class="fertig-banner">
             <h1 style="color: white; margin: 0; font-size: 3em;">✅ FERTIG!</h1>
-            <p style="color: white; font-size: 1.2em; margin: 10px 0 0 0;">{total_docs} Dokumente verarbeitet</p>
+            <p style="color: white; font-size: 1.5em; margin: 10px 0 0 0;">{total_docs} Dokumente verarbeitet</p>
         </div>
         """, unsafe_allow_html=True)
 
-        # Verteilung anzeigen
+        # Verteilung nach Sachbearbeiter
         st.subheader("📊 Verteilung nach Sachbearbeiter")
-        cols = st.columns(min(4, max(1, len(ergebnisse['sachbearbeiter_stats']))))
+        sb_cols = st.columns(min(5, max(1, len(ergebnisse['sachbearbeiter_stats']))))
         for i, (sb, count) in enumerate(sorted(ergebnisse['sachbearbeiter_stats'].items())):
-            if count > 0:
-                with cols[i % len(cols)]:
-                    st.metric(sb, f"{count} Dok.")
+            with sb_cols[i % len(sb_cols)]:
+                st.metric(sb, f"{count} Dok.")
 
         st.markdown("---")
 
-        # =====================================================================
-        # Downloads & Email-Versand
-        # =====================================================================
-        col_download, col_email = st.columns(2)
+        # Downloads und Email nebeneinander
+        col_dl, col_mail = st.columns(2)
 
-        with col_download:
+        # === DOWNLOADS ===
+        with col_dl:
             st.subheader("📥 Downloads")
-            for sb, zip_bytes in ergebnisse['zip_dateien'].items():
+            for sb, zip_bytes in sorted(ergebnisse['zip_dateien'].items()):
                 zip_name = f"{sb}"
                 if scanner_name:
                     zip_name += f"_{scanner_name}"
@@ -1536,21 +1704,23 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
                     zip_name += f"_{scan_datum}"
                 zip_name += ".zip"
 
+                doc_count = ergebnisse['sachbearbeiter_stats'].get(sb, 0)
                 st.download_button(
-                    label=f"📦 {zip_name}",
+                    label=f"📦 {sb} ({doc_count} Dok.)",
                     data=zip_bytes,
                     file_name=zip_name,
                     mime="application/zip",
-                    key=f"empfang_simple_zip_{sb}",
+                    key=f"dl_{sb}",
                     use_container_width=True
                 )
 
-        with col_email:
-            st.subheader("📧 Per Email versenden")
+        # === EMAIL-VERSAND ===
+        with col_mail:
+            st.subheader("📧 Email-Versand")
 
-            # SMTP-Konfiguration aus Secrets laden
+            # SMTP aus Secrets
             smtp_from_secrets = False
-            smtp_server_val = "smtp.office365.com"
+            smtp_server_val = "smtp.web.de"
             smtp_port_val = 587
             smtp_user_val = ""
             smtp_pass_val = ""
@@ -1565,86 +1735,63 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
                     if smtp_user_val and smtp_pass_val:
                         smtp_from_secrets = True
             except Exception as e:
-                st.warning(f"⚠️ Fehler beim Laden der Secrets: {e}")
+                st.warning(f"⚠️ Secrets-Fehler: {e}")
 
             if smtp_from_secrets:
-                st.success(f"🔐 SMTP: {smtp_user_val} @ {smtp_server_val}")
+                st.success(f"🔐 {smtp_user_val}")
             else:
-                st.warning("⚠️ SMTP nicht in Secrets konfiguriert - bitte manuell eingeben")
-                smtp_server_val = st.text_input("SMTP Server", value=smtp_server_val, key="smtp_emp_server")
-                smtp_port_val = st.number_input("Port", value=smtp_port_val, key="smtp_emp_port")
-                smtp_user_val = st.text_input("Email-Adresse", key="smtp_emp_user")
-                smtp_pass_val = st.text_input("Passwort", type="password", key="smtp_emp_pass")
+                st.warning("⚠️ SMTP in secrets.toml konfigurieren")
+                with st.expander("SMTP manuell eingeben"):
+                    smtp_server_val = st.text_input("Server", value=smtp_server_val, key="smtp_s")
+                    smtp_port_val = st.number_input("Port", value=smtp_port_val, key="smtp_p")
+                    smtp_user_val = st.text_input("User", key="smtp_u")
+                    smtp_pass_val = st.text_input("Passwort", type="password", key="smtp_pw")
 
-            # Test-Button für SMTP-Verbindung
-            if st.button("🔌 Verbindung testen", key="test_smtp_btn"):
+            # Test-Button
+            if st.button("🔌 Verbindung testen", key="test_smtp"):
                 if smtp_user_val and smtp_pass_val:
                     try:
                         import smtplib
-                        with st.spinner("Teste SMTP-Verbindung..."):
-                            with smtplib.SMTP(smtp_server_val, smtp_port_val, timeout=10) as server:
-                                server.starttls()
-                                server.login(smtp_user_val, smtp_pass_val)
-                        st.success("✅ SMTP-Verbindung erfolgreich!")
-                    except smtplib.SMTPAuthenticationError as e:
-                        st.error(f"❌ Authentifizierung fehlgeschlagen: {e}")
-                    except smtplib.SMTPConnectError as e:
-                        st.error(f"❌ Verbindung fehlgeschlagen: {e}")
+                        with smtplib.SMTP(smtp_server_val, smtp_port_val, timeout=10) as server:
+                            server.starttls()
+                            server.login(smtp_user_val, smtp_pass_val)
+                        st.success("✅ Verbindung OK!")
                     except Exception as e:
-                        st.error(f"❌ SMTP-Fehler: {type(e).__name__}: {e}")
-                else:
-                    st.warning("⚠️ Bitte SMTP-Zugangsdaten eingeben")
+                        st.error(f"❌ {e}")
 
             st.markdown("---")
 
-            # Empfänger-Auswahl mit Vorschlägen aus RENO-Zuordnungen
-            st.markdown("**Empfänger auswählen:**")
-
-            # Lade RENO-Zuordnungen
+            # Empfänger-Auswahl
+            st.markdown("**Empfänger pro Sachbearbeiter:**")
             reno_zuordnungen = storage.get_reno_zuordnungen()
-
-            # Für jeden Sachbearbeiter Empfänger vorschlagen
             versand_auswahl = {}
-            for sb in ergebnisse['zip_dateien'].keys():
-                verfuegbare_renos = reno_zuordnungen.get(sb, reno_zuordnungen.get('nicht-zugeordnet', []))
 
+            for sb in sorted(ergebnisse['zip_dateien'].keys()):
+                verfuegbare_renos = reno_zuordnungen.get(sb, reno_zuordnungen.get('nicht-zugeordnet', []))
                 if verfuegbare_renos:
                     reno_optionen = [f"{r['name']} ({r['email']})" for r in verfuegbare_renos]
                     ausgewaehlte = st.multiselect(
                         f"📬 {sb}:",
                         options=reno_optionen,
                         default=[reno_optionen[0]] if reno_optionen else [],
-                        key=f"reno_select_{sb}"
+                        key=f"reno_{sb}"
                     )
-                    # Extrahiere Emails aus Auswahl
                     versand_auswahl[sb] = []
                     for auswahl in ausgewaehlte:
                         for reno in verfuegbare_renos:
                             if f"{reno['name']} ({reno['email']})" == auswahl:
                                 versand_auswahl[sb].append(reno)
                 else:
-                    st.caption(f"⚠️ Keine Empfänger für {sb} konfiguriert")
+                    st.caption(f"⚠️ {sb}: Keine Empfänger konfiguriert")
 
-            # Zusätzliche Empfänger (manuell)
-            extra_emails = st.text_input(
-                "Weitere Empfänger (kommagetrennt)",
-                placeholder="email1@example.com, email2@example.com",
-                key="empfang_extra_emails"
-            )
-
-            # Versenden-Button
-            if st.button("📤 Jetzt versenden", type="primary", key="empfang_send_btn", use_container_width=True):
+            # Versenden
+            if st.button("📤 Jetzt versenden", type="primary", key="send_emails", use_container_width=True):
                 if not smtp_user_val or not smtp_pass_val:
-                    st.error("❌ SMTP-Zugangsdaten fehlen! Bitte oben eingeben oder in secrets.toml konfigurieren.")
-                elif not any(versand_auswahl.values()) and not extra_emails:
-                    st.warning("⚠️ Bitte mindestens einen Empfänger auswählen")
+                    st.error("❌ SMTP-Zugangsdaten fehlen!")
+                elif not any(versand_auswahl.values()):
+                    st.warning("⚠️ Keine Empfänger ausgewählt")
                 else:
-                    # Zeige was versendet wird
-                    total_emails = sum(len(renos) for renos in versand_auswahl.values())
-                    if extra_emails:
-                        total_emails += len([e for e in extra_emails.split(',') if e.strip()]) * len(ergebnisse['zip_dateien'])
-
-                    with st.spinner(f"📤 Versende {total_emails} Email(s)..."):
+                    with st.spinner("📤 Versende Emails..."):
                         try:
                             sender = EmailSender(
                                 smtp_server=smtp_server_val,
@@ -1652,98 +1799,43 @@ if current_user['role'] in ['Administrator', 'Empfang'] and dashboard_auswahl ==
                                 smtp_user=smtp_user_val,
                                 smtp_password=smtp_pass_val
                             )
-
                             erfolge = 0
-                            fehler = 0
-                            fehler_details = []
-
-                            # Versand an ausgewählte RENOs
                             for sb, renos in versand_auswahl.items():
                                 if sb not in ergebnisse['zip_dateien']:
                                     continue
-
                                 zip_bytes = ergebnisse['zip_dateien'][sb]
-                                zip_name = f"{sb}"
-                                if scanner_name:
-                                    zip_name += f"_{scanner_name}"
-                                if scan_datum:
-                                    zip_name += f"_{scan_datum}"
-                                zip_name += ".zip"
+                                zip_name = f"{sb}_{scanner_name}_{scan_datum}.zip" if scanner_name else f"{sb}_{scan_datum}.zip"
 
                                 for reno in renos:
-                                    try:
-                                        success = sender.sende_zip_an_reno(
-                                            reno_email=reno['email'],
-                                            reno_name=reno['name'],
-                                            sachbearbeiter=sb,
-                                            zip_data=zip_bytes,
-                                            anzahl_dokumente=ergebnisse['sachbearbeiter_stats'].get(sb, 0),
-                                            datum=scan_datum,
-                                            zip_filename=zip_name,
-                                            scanner_name=scanner_name
-                                        )
-                                        if success:
-                                            erfolge += 1
-                                            st.info(f"✓ {sb} → {reno['email']}")
-                                        else:
-                                            fehler += 1
-                                            fehler_details.append(f"{sb} → {reno['email']}: Versand fehlgeschlagen")
-                                    except Exception as e:
-                                        fehler += 1
-                                        fehler_details.append(f"{sb} → {reno['email']}: {str(e)}")
+                                    success = sender.sende_zip_an_reno(
+                                        reno_email=reno['email'],
+                                        reno_name=reno['name'],
+                                        sachbearbeiter=sb,
+                                        zip_data=zip_bytes,
+                                        anzahl_dokumente=ergebnisse['sachbearbeiter_stats'].get(sb, 0),
+                                        datum=scan_datum,
+                                        zip_filename=zip_name,
+                                        scanner_name=scanner_name
+                                    )
+                                    if success:
+                                        erfolge += 1
+                                        st.info(f"✓ {sb} → {reno['email']}")
 
-                            # Versand an zusätzliche Empfänger
-                            if extra_emails:
-                                for email in [e.strip() for e in extra_emails.split(',') if e.strip()]:
-                                    for sb, zip_bytes in ergebnisse['zip_dateien'].items():
-                                        zip_name = f"{sb}_{scanner_name}_{scan_datum}.zip" if scanner_name else f"{sb}_{scan_datum}.zip"
-                                        try:
-                                            success = sender.sende_zip_an_reno(
-                                                reno_email=email,
-                                                reno_name=email.split('@')[0],
-                                                sachbearbeiter=sb,
-                                                zip_data=zip_bytes,
-                                                anzahl_dokumente=ergebnisse['sachbearbeiter_stats'].get(sb, 0),
-                                                datum=scan_datum,
-                                                zip_filename=zip_name
-                                            )
-                                            if success:
-                                                erfolge += 1
-                                                st.info(f"✓ {sb} → {email}")
-                                            else:
-                                                fehler += 1
-                                                fehler_details.append(f"{sb} → {email}: Versand fehlgeschlagen")
-                                        except Exception as e:
-                                            fehler += 1
-                                            fehler_details.append(f"{sb} → {email}: {str(e)}")
-
-                            # Ergebnis anzeigen
-                            if fehler == 0 and erfolge > 0:
-                                st.success(f"✅ {erfolge} Email(s) erfolgreich versendet!")
-                            elif erfolge > 0:
-                                st.warning(f"⚠️ {erfolge} erfolgreich, {fehler} fehlgeschlagen")
-                            else:
-                                st.error(f"❌ Alle {fehler} Emails fehlgeschlagen")
-
-                            # Fehlerdetails anzeigen
-                            if fehler_details:
-                                with st.expander("❌ Fehlerdetails"):
-                                    for detail in fehler_details:
-                                        st.text(detail)
-
+                            st.success(f"✅ {erfolge} Email(s) versendet!")
                         except Exception as e:
-                            st.error(f"❌ Email-Fehler: {type(e).__name__}: {str(e)}")
-                            import traceback
-                            with st.expander("🔍 Technische Details"):
-                                st.code(traceback.format_exc())
+                            st.error(f"❌ Fehler: {e}")
 
-        # Reset-Button
+        # Reset
         st.markdown("---")
-        if st.button("🔄 Neuen Posteingang verarbeiten", key="empfang_simple_reset", use_container_width=True):
-            for key in ['empfang_simple_ergebnisse', 'empfang_simple_done', 'empfang_upload_name', 'empfang_upload_time']:
+        if st.button("🔄 Neuen Posteingang verarbeiten", key="reset_empfang", use_container_width=True):
+            for key in ['empfang_simple_ergebnisse', 'empfang_simple_done', 'empfang_upload_name',
+                        'empfang_upload_time', 'empfang_uploaded_files']:
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()
+
+    else:
+        st.info("ℹ️ Bitte erst Schritt 1 und 2 abschließen")
 
 # ============================================================================
 # DASHBOARD RENOS (Erweitert) - Haupt-Upload-Bereich
