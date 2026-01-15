@@ -3668,6 +3668,9 @@ with tab7:
     st.markdown("---")
     st.subheader("📊 System-Statistiken")
 
+    # Hole backup_stats hier (falls nicht schon definiert)
+    backup_stats = backup_mgr.get_statistics()
+
     col1, col2, col3 = st.columns(3)
 
     with col1:
