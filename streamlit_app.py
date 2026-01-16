@@ -1465,10 +1465,19 @@ if dashboard_auswahl == "Dashboard Empfang (Einfach)":
 
     if aktenregister_vorhanden:
         stats = storage.get_aktenregister_stats()
-        dt = datetime.fromtimestamp(stats['last_modified'])
-        formatted_date = dt.strftime('%d.%m.%Y %H:%M')
-        ampel_1 = "ampel-gruen"
-        step_bg_1 = "#d4edda"
+        # Sicherheitsprüfung: stats könnte {'exists': False} sein
+        if stats.get('exists') and 'last_modified' in stats:
+            dt = datetime.fromtimestamp(stats['last_modified'])
+            formatted_date = dt.strftime('%d.%m.%Y %H:%M')
+            ampel_1 = "ampel-gruen"
+            step_bg_1 = "#d4edda"
+        else:
+            # Datei existiert aber ist ungültig
+            stats = None
+            formatted_date = "Fehler beim Laden"
+            ampel_1 = "ampel-rot"
+            step_bg_1 = "#f8d7da"
+            aktenregister_vorhanden = False
     else:
         stats = None
         formatted_date = "-"
@@ -1916,11 +1925,14 @@ if dashboard_auswahl == "Dashboard Renos (Erweitert)":
         # Zeige Status: Gespeichertes Register vorhanden?
         if storage.has_aktenregister():
             stats = storage.get_aktenregister_stats()
-            # Format timestamp
-            from datetime import datetime
-            dt = datetime.fromtimestamp(stats['last_modified'])
-            formatted = dt.strftime('%d.%m.%Y %H:%M')
-            st.success(f"💾 Gespeichertes Register: {stats['count']} Akten\n\n*Zuletzt aktualisiert: {formatted}*")
+            # Sicherheitsprüfung
+            if stats.get('exists') and 'last_modified' in stats:
+                from datetime import datetime
+                dt = datetime.fromtimestamp(stats['last_modified'])
+                formatted = dt.strftime('%d.%m.%Y %H:%M')
+                st.success(f"💾 Gespeichertes Register: {stats['count']} Akten\n\n*Zuletzt aktualisiert: {formatted}*")
+            else:
+                st.warning("⚠️ Register-Datei beschädigt")
 
             # Lösch-Button
             if st.button("🗑️ Gespeichertes Register löschen"):
