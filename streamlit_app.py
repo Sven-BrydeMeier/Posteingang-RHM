@@ -983,35 +983,9 @@ else:
     # Hole aktuellen Key
     current_api_key = st.session_state.api_keys.get(current_provider_key, '')
 
-    # API-Key Verbindungstest
+    # API-Key Status (ohne langsamen Verbindungstest)
     if current_api_key:
-        try:
-            if api_provider == "OpenAI (ChatGPT)":
-                from openai import OpenAI
-                test_client = OpenAI(api_key=current_api_key)
-                test_client.models.list()
-                st.sidebar.markdown("🟢 **Verbindung erfolgreich**")
-
-            elif api_provider == "Claude (Anthropic)":
-                import anthropic
-                test_client = anthropic.Anthropic(api_key=current_api_key)
-                # Test mit einfachem API-Aufruf
-                test_client.models.list()
-                st.sidebar.markdown("🟢 **Verbindung erfolgreich**")
-
-            elif api_provider == "Gemini (Google)":
-                import google.generativeai as genai
-                genai.configure(api_key=current_api_key)
-                # Test: Liste verfügbare Modelle
-                list(genai.list_models())
-                st.sidebar.markdown("🟢 **Verbindung erfolgreich**")
-
-        except Exception as e:
-            error_msg = str(e)
-            if "authentication" in error_msg.lower() or "api key" in error_msg.lower() or "api_key" in error_msg.lower():
-                st.sidebar.markdown("🔴 **Ungültiger API-Key**")
-            else:
-                st.sidebar.markdown(f"🟡 **Verbindungsfehler**: {error_msg[:100]}")
+        st.sidebar.markdown("🟢 **API-Key vorhanden**")
     else:
         st.sidebar.markdown("⚪ **Kein API-Key eingegeben**")
 
