@@ -1522,23 +1522,24 @@ if dashboard_auswahl == "Dashboard Empfang (Einfach)":
             "Aktenregister hochladen (.xlsx)" if not aktenregister_vorhanden else "Neues Register hochladen (optional)",
             type=["xlsx"],
             key="empfang_step1_excel",
-            help="Excel-Datei mit Blatt 'akten' - wird automatisch gespeichert"
+            help="Excel-Datei mit Blatt 'akten'"
         )
 
-        # AUTOMATISCH SPEICHERN wenn Datei hochgeladen wird
+        # Speichern mit Button (verhindert Endlosschleife)
         if empfang_excel:
-            try:
-                import pandas as pd
-                new_df = pd.read_excel(
-                    BytesIO(empfang_excel.read()),
-                    sheet_name='akten',
-                    header=1
-                )
-                storage.save_aktenregister(new_df, merge=storage.has_aktenregister())
-                st.success("✅ Aktenregister automatisch gespeichert!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Fehler beim Speichern: {e}")
+            if st.button("💾 Register jetzt speichern", type="primary", key="save_register_empfang"):
+                try:
+                    import pandas as pd
+                    new_df = pd.read_excel(
+                        BytesIO(empfang_excel.read()),
+                        sheet_name='akten',
+                        header=1
+                    )
+                    storage.save_aktenregister(new_df, merge=storage.has_aktenregister())
+                    st.success("✅ Aktenregister gespeichert!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Fehler beim Speichern: {e}")
 
     st.markdown("---")
 
