@@ -152,6 +152,36 @@ class PersistentStorage:
 
     # ==================== AKTENREGISTER ====================
 
+    def _detect_excel_header(self, excel_path: Path, sheet_name: str = 'akten') -> int:
+        """
+        Erkennt automatisch die Header-Zeile in einer Excel-Datei.
+
+        Returns:
+            Header-Zeile (0, 1, oder 2)
+        """
+        # Versuche verschiedene Header-Zeilen (1, 0, 2) - wie in aktenzeichen_erkennung.py
+        for header_row in [1, 0, 2]:
+            try:
+                df = pd.read_excel(
+                    excel_path,
+                    sheet_name=sheet_name,
+                    header=header_row,
+                    engine='openpyxl'
+                )
+
+                # Prüfe ob Spalten sinnvoll sind (nicht nur "Unnamed")
+                unnamed_count = sum(1 for col in df.columns if str(col).startswith('Unnamed'))
+                total_cols = len(df.columns)
+
+                # Wenn weniger als 50% "Unnamed" Spalten, ist es wahrscheinlich der richtige Header
+                if total_cols > 0 and unnamed_count < total_cols * 0.5:
+                    return header_row
+            except Exception:
+                continue
+
+        # Fallback: Verwende header=1
+        return 1
+
     def save_aktenregister(self, new_df: pd.DataFrame, merge: bool = True) -> pd.DataFrame:
         """
         Speichert Aktenregister.
@@ -164,13 +194,13 @@ class PersistentStorage:
             Gespeichertes (ggf. gemergtes) DataFrame
         """
         if merge and self.aktenregister_file.exists():
-            # Lade vorhandene Daten
-            # Explizite Engine für bessere Kompatibilität
+            # Lade vorhandene Daten mit automatischer Header-Erkennung
+            header_row = self._detect_excel_header(self.aktenregister_file)
             existing_df = pd.read_excel(
                 self.aktenregister_file,
                 sheet_name='akten',
-                header=1,
-                engine='openpyxl'  # Standard für .xlsx Dateien
+                header=header_row,
+                engine='openpyxl'
             )
 
             # Merge: Neue Zeilen hinzufügen, existierende aktualisieren
@@ -199,7 +229,7 @@ class PersistentStorage:
 
     def load_aktenregister(self) -> Optional[pd.DataFrame]:
         """
-        Lädt gespeichertes Aktenregister.
+        Lädt gespeichertes Aktenregister mit automatischer Header-Erkennung.
 
         Returns:
             DataFrame oder None wenn nicht vorhanden
@@ -208,12 +238,25 @@ class PersistentStorage:
             return None
 
         try:
+            # Automatische Header-Erkennung
+            header_row = self._detect_excel_header(self.aktenregister_file)
             df = pd.read_excel(
                 self.aktenregister_file,
                 sheet_name='akten',
-                header=1,
+                header=header_row,
                 engine='openpyxl'
             )
+
+            # Prüfe ob Ergebnis sinnvoll ist
+            if df.empty:
+                return None
+
+            # Entferne "Unnamed" Spalten die komplett leer sind
+            unnamed_cols = [col for col in df.columns if str(col).startswith('Unnamed')]
+            for col in unnamed_cols:
+                if df[col].isna().all():
+                    df = df.drop(columns=[col])
+
             return df
         except Exception as e:
             return None
