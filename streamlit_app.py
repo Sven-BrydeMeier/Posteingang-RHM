@@ -29,6 +29,7 @@ from dashboard_manager import DashboardManager
 from user_management import UserManager, UserRole
 from browser_notifications import BrowserNotificationManager
 from user_dashboard import UserDashboard
+from akten_digitalisierung import AktenDigitalisierer
 
 # Versionsnummer: Zähler.JJ.MM.TT.HH.MM (HH.MM = echte Uhrzeit der letzten Änderung)
 _now = datetime.now()
@@ -3153,14 +3154,15 @@ if not ist_empfang:
     st.markdown("---")
     st.header("🚀 Erweiterte Features")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "📊 Dashboard",
         "🔍 Volltext-Suche",
         "📌 Wiedervorlagen",
         "📧 Email-Import",
         "📁 Hot Folder & Ablage",
         "🔔 Benachrichtigungen",
-        "⚙️ System & Backup"
+        "⚙️ System & Backup",
+        "📚 Aktendigitalisierung"
     ])
 
     with tab1:
@@ -3691,6 +3693,170 @@ if not ist_empfang:
 
         with col3:
             st.metric("PDF-Dateien", storage_stats['pdf_count'])
+
+    with tab8:
+        st.subheader("📚 Aktendigitalisierung")
+        st.markdown("""
+        **Komplette Akten digitalisieren** - ohne Trennblätter!
+
+        Diese Funktion erkennt automatisch:
+        - 📄 Dokumentanfänge (Briefköpfe, Anreden)
+        - 📅 Datum des Dokuments
+        - 👤 Absender/Empfänger (Mandant, Gegner, Gericht, etc.)
+        - 📝 Dokumenttyp und Inhalt
+
+        **Ergebnis:** ZIP-Datei mit logischer Ordnerstruktur und sprechenden Dateinamen.
+        """)
+
+        st.markdown("---")
+
+        # Eingabefelder
+        col1, col2 = st.columns(2)
+
+        with col1:
+            digi_aktenzeichen = st.text_input(
+                "📁 Aktenzeichen (optional)",
+                placeholder="z.B. 123/24M",
+                key="digi_aktenzeichen"
+            )
+
+        with col2:
+            digi_mandant = st.text_input(
+                "👤 Mandant (optional)",
+                placeholder="z.B. Müller, Hans",
+                key="digi_mandant"
+            )
+
+        # Konfidenz-Schwellwert
+        digi_confidence = st.slider(
+            "🎯 Erkennungs-Empfindlichkeit",
+            min_value=0.3,
+            max_value=0.8,
+            value=0.5,
+            step=0.1,
+            help="Niedriger = mehr Trennungen (evtl. falsche), Höher = weniger Trennungen (evtl. verpasste)"
+        )
+
+        st.markdown("---")
+
+        # PDF Upload
+        digi_pdf = st.file_uploader(
+            "📄 Gescannte Akte hochladen (PDF)",
+            type=['pdf'],
+            key="digi_pdf_upload",
+            help="Laden Sie die komplette gescannte Akte als PDF hoch"
+        )
+
+        if digi_pdf:
+            st.success(f"✅ **{digi_pdf.name}** geladen ({digi_pdf.size / 1024 / 1024:.1f} MB)")
+
+            # Vorschau-Button
+            if st.button("👁️ Vorschau der Dokumenttrennung", key="digi_preview"):
+                with st.spinner("Analysiere Seiten..."):
+                    try:
+                        digitalisierer = AktenDigitalisierer(
+                            api_client=None,  # Keine KI für Vorschau
+                            confidence_threshold=digi_confidence
+                        )
+
+                        preview = digitalisierer.preview_split(digi_pdf.getvalue())
+
+                        st.markdown("### 📋 Erkannte Dokumente:")
+                        for doc in preview:
+                            konfidenz_icon = "🟢" if doc['erste_seite_konfidenz'] >= 0.6 else "🟡" if doc['erste_seite_konfidenz'] >= 0.4 else "🔴"
+                            st.markdown(f"""
+                            **Dokument {doc['dokument_nr']}**: Seiten {doc['seiten']} ({doc['seitenanzahl']} Seiten) {konfidenz_icon}
+                            """)
+
+                        st.info(f"📊 Insgesamt **{len(preview)} Dokumente** erkannt")
+
+                    except Exception as e:
+                        st.error(f"❌ Fehler bei der Vorschau: {e}")
+
+            st.markdown("---")
+
+            # Verarbeitung starten
+            if st.button("🚀 Akte digitalisieren", type="primary", key="digi_start"):
+                with st.spinner("Verarbeite Akte... Dies kann einige Minuten dauern."):
+                    try:
+                        # API Client für KI-Analyse
+                        api_client = None
+                        api_type = "openai"
+
+                        if current_api_key:
+                            if st.session_state.get('selected_provider') == 'OpenAI':
+                                from openai import OpenAI
+                                api_client = OpenAI(api_key=current_api_key)
+                                api_type = "openai"
+                            elif st.session_state.get('selected_provider') == 'Claude':
+                                import anthropic
+                                api_client = anthropic.Anthropic(api_key=current_api_key)
+                                api_type = "anthropic"
+
+                        digitalisierer = AktenDigitalisierer(
+                            api_client=api_client,
+                            api_type=api_type,
+                            confidence_threshold=digi_confidence
+                        )
+
+                        documents, zip_data = digitalisierer.process_pdf_bytes(
+                            digi_pdf.getvalue(),
+                            aktenzeichen=digi_aktenzeichen,
+                            mandant=digi_mandant
+                        )
+
+                        st.success(f"✅ **{len(documents)} Dokumente** erfolgreich erkannt und verarbeitet!")
+
+                        # Ergebnis-Übersicht
+                        st.markdown("### 📊 Ergebnis-Übersicht")
+
+                        for i, doc in enumerate(documents):
+                            with st.expander(f"📄 {doc.filename or f'Dokument {i+1}'}"):
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.write(f"**Seiten:** {doc.start_page + 1} - {doc.end_page + 1}")
+                                    st.write(f"**Datum:** {doc.datum or 'Nicht erkannt'}")
+                                    st.write(f"**Absender:** {doc.absender or 'Nicht erkannt'}")
+                                with col2:
+                                    st.write(f"**Typ:** {doc.dokumenttyp or 'Dokument'}")
+                                    st.write(f"**Ordner:** {doc.folder}")
+                                    st.write(f"**Konfidenz:** {doc.confidence:.0%}")
+
+                        # Download-Button
+                        st.markdown("---")
+
+                        zip_filename = f"Akte_{digi_aktenzeichen.replace('/', '-') if digi_aktenzeichen else datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+
+                        st.download_button(
+                            label="📥 ZIP-Datei herunterladen",
+                            data=zip_data,
+                            file_name=zip_filename,
+                            mime="application/zip",
+                            type="primary"
+                        )
+
+                        st.markdown("---")
+                        st.markdown("""
+                        ### 📂 ZIP-Inhalt:
+                        ```
+                        Akte_XXX/
+                        ├── 01_Mandant/
+                        ├── 02_Gegner/
+                        ├── 03_Gericht/
+                        ├── 04_Behoerden/
+                        ├── 05_Versicherung/
+                        ├── 06_Sonstige/
+                        └── 00_Uebersicht.json
+                        ```
+                        """)
+
+                    except Exception as e:
+                        st.error(f"❌ Fehler bei der Verarbeitung: {e}")
+                        import traceback
+                        st.code(traceback.format_exc())
+
+        else:
+            st.info("👆 Bitte laden Sie eine gescannte Akte als PDF hoch")
 
     # Info-Box
     st.markdown("---")
