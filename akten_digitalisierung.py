@@ -67,28 +67,57 @@ class FirstPageDetector:
     - Aktenzeichen-Muster
     """
 
-    # Typische Muster für erste Seiten
+    # Typische Muster für erste Seiten (mit Gewichtung)
     FIRST_PAGE_PATTERNS = [
-        r'(?i)^.*?(sehr geehrte|dear)',  # Anrede
-        r'(?i)betreff\s*:',  # Betreff
-        r'(?i)ihr zeichen\s*:',  # Zeichen-Referenz
-        r'(?i)unser zeichen\s*:',
-        r'(?i)datum\s*:\s*\d{1,2}[\./]\d{1,2}[\./]\d{2,4}',  # Explizites Datum
-        r'(?i)^.{0,200}(gmbh|ag|e\.v\.|rechtsanw|kanzlei|anwalt)',  # Firmierung oben
-        r'(?i)geschäftszeichen',
-        r'(?i)aktenzeichen\s*:',
+        # Anreden (stark)
+        (r'(?i)sehr geehrte[r]?\s+(frau|herr|damen|herren)', 0.25),
+        (r'(?i)^.*?dear\s+(mr|mrs|ms|sir|madam)', 0.20),
+        (r'(?i)guten\s+tag', 0.15),
+
+        # Betreff/Zeichen-Felder (sehr stark)
+        (r'(?i)betreff\s*:', 0.30),
+        (r'(?i)ihr\s+zeichen\s*:', 0.25),
+        (r'(?i)unser\s+zeichen\s*:', 0.25),
+        (r'(?i)geschäftszeichen\s*:', 0.25),
+        (r'(?i)aktenzeichen\s*:', 0.25),
+        (r'(?i)az\.?\s*:', 0.20),
+
+        # Datum im Header-Bereich (mittel)
+        (r'(?i)datum\s*:\s*\d{1,2}[\./]\d{1,2}[\./]\d{2,4}', 0.15),
+
+        # Firmierung/Briefkopf (mittel)
+        (r'(?i)^.{0,300}(gmbh|ag\b|e\.?\s*v\.?|rechtsanw|kanzlei|anwalt|notar)', 0.15),
+        (r'(?i)^.{0,300}(amtsgericht|landgericht|oberlandesgericht|verwaltungsgericht)', 0.20),
+        (r'(?i)^.{0,300}(versicherung|allianz|huk|axa|ergo)', 0.15),
+
+        # Typische Briefelemente
+        (r'(?i)per\s+(fax|email|e-mail|einschreiben)', 0.15),
+        (r'(?i)in\s+sachen\s*:', 0.25),  # Gerichtsdokumente
+        (r'(?i)wegen\s*:', 0.15),
+
+        # Postanschrift (Name + Straße + PLZ)
+        (r'(?i)straße|str\.\s*\d|weg\s+\d|platz\s+\d', 0.10),
+        (r'\b\d{5}\s+[A-ZÄÖÜ][a-zäöüß]+', 0.10),  # PLZ Stadt
+
+        # Referenznummern
+        (r'(?i)kunden.?nr\.?\s*:', 0.10),
+        (r'(?i)vertrags.?nr\.?\s*:', 0.10),
+        (r'(?i)schaden.?nr\.?\s*:', 0.15),
     ]
 
     # Muster die GEGEN eine erste Seite sprechen
     CONTINUATION_PATTERNS = [
-        r'(?i)^[\s]*-\s*\d+\s*-',  # Seitennummer "-2-"
-        r'(?i)seite\s+\d+\s+(von|/)\s+\d+',  # "Seite 2 von 3"
-        r'(?i)^\s*\d+\s*$',  # Nur Seitenzahl
-        r'(?i)^.*fortsetzung',  # "Fortsetzung"
+        (r'(?i)^[\s]*-\s*\d+\s*-', 0.40),  # Seitennummer "-2-"
+        (r'(?i)seite\s+(\d+)\s+(von|/)\s+\d+', 0.35),  # "Seite 2 von 3" (nur wenn >1)
+        (r'(?i)^\s*-?\s*\d{1,2}\s*-?\s*$', 0.25),  # Nur Seitenzahl
+        (r'(?i)^.*?fortsetzung', 0.30),  # "Fortsetzung"
+        (r'(?i)^.*?blatt\s+\d+', 0.25),  # "Blatt 2"
+        (r'(?i)^\s*\.\.\.\s*$', 0.30),  # Fortsetzungspunkte
     ]
 
     def __init__(self):
         self.header_templates = []  # Für Template-Matching
+        self.previous_page_hash = None  # Für Ähnlichkeitsvergleich
 
     def analyze_page(self, page_text: str, page_image: Optional[Image.Image] = None,
                      page_num: int = 0) -> Tuple[float, Dict[str, Any]]:
@@ -105,20 +134,33 @@ class FirstPageDetector:
             'visual_features': {}
         }
 
-        # Textuelle Analyse
-        text_upper = page_text[:2000] if len(page_text) > 2000 else page_text  # Oberer Bereich
+        # Textuelle Analyse - fokussiere auf oberen Bereich (Header)
+        text_upper = page_text[:2500] if len(page_text) > 2500 else page_text
 
-        # Prüfe auf First-Page-Muster
-        for pattern in self.FIRST_PAGE_PATTERNS:
+        # Prüfe auf First-Page-Muster (mit individueller Gewichtung)
+        for pattern, weight in self.FIRST_PAGE_PATTERNS:
             if re.search(pattern, text_upper, re.MULTILINE):
-                score += 0.15
+                score += weight
                 details['first_page_indicators'].append(pattern)
 
         # Prüfe auf Continuation-Muster (negative Indikatoren)
-        for pattern in self.CONTINUATION_PATTERNS:
-            if re.search(pattern, page_text[:500], re.MULTILINE):
-                score -= 0.3
-                details['continuation_indicators'].append(pattern)
+        first_500_chars = page_text[:500]
+        for pattern, weight in self.CONTINUATION_PATTERNS:
+            match = re.search(pattern, first_500_chars, re.MULTILINE)
+            if match:
+                # Spezialfall: "Seite X von Y" - nur negativ wenn X > 1
+                if 'seite' in pattern.lower():
+                    try:
+                        page_num_match = re.search(r'(\d+)', match.group())
+                        if page_num_match and int(page_num_match.group(1)) > 1:
+                            score -= weight
+                            details['continuation_indicators'].append(pattern)
+                    except:
+                        score -= weight
+                        details['continuation_indicators'].append(pattern)
+                else:
+                    score -= weight
+                    details['continuation_indicators'].append(pattern)
 
         # Visuelle Analyse (wenn Bild verfügbar)
         if page_image:
@@ -528,29 +570,48 @@ class AktenDigitalisierer:
         }
         document.folder = folder_mapping.get(partei_rolle, '06_Sonstige')
 
-        # Dateiname generieren: Datum-Partei-Inhalt(4Worte)
+        # Dateiname generieren: Aktenzeichen_Datum_Partei_Inhalt(4Worte)
+
+        # 1. Aktenzeichen (vom Benutzer eingegeben)
+        az_str = ""
+        if aktenzeichen:
+            az_str = aktenzeichen.replace('/', '-').replace(' ', '_')
+
+        # 2. Datum
         datum_str = document.datum or datetime.now().strftime('%d.%m.%Y')
         datum_str = datum_str.replace('.', '-')
 
-        # Partei aus Absender/Empfänger
-        partei = analysis.get('absender', 'Unbekannt')
+        # 3. Partei - Priorität: Mandant (wenn eingegeben) > Absender aus Analyse
+        if mandant:
+            partei = mandant
+        else:
+            partei = analysis.get('absender') or analysis.get('empfaenger') or 'Unbekannt'
+
         if partei:
             # Bereinige Parteinamen
-            partei = re.sub(r'[^\w\säöüÄÖÜß-]', '', partei)[:30]
+            partei = re.sub(r'[^\w\säöüÄÖÜß-]', '', str(partei))[:30]
             partei = partei.strip().replace(' ', '_')
         else:
             partei = 'Unbekannt'
 
-        # Kurzbeschreibung (4 Worte)
+        # 4. Kurzbeschreibung (4 Worte)
         kurz = analysis.get('kurzbeschreibung', 'Dokument')
-        kurz = re.sub(r'[^\w\säöüÄÖÜß-]', '', kurz)
-        kurz = '_'.join(kurz.split()[:4])
+        if kurz:
+            kurz = re.sub(r'[^\w\säöüÄÖÜß-]', '', str(kurz))
+            kurz = '_'.join(kurz.split()[:4])
+        else:
+            kurz = 'Dokument'
 
-        # Finale Dateiname
-        filename = f"{datum_str}_{partei}_{kurz}.pdf"
+        # Finale Dateiname: Aktenzeichen_Datum_Partei_Inhalt.pdf
+        if az_str:
+            filename = f"{az_str}_{datum_str}_{partei}_{kurz}.pdf"
+        else:
+            filename = f"{datum_str}_{partei}_{kurz}.pdf"
+
         # Bereinige ungültige Zeichen
         filename = re.sub(r'[<>:"/\\|?*]', '', filename)
         filename = re.sub(r'_+', '_', filename)  # Mehrfache Unterstriche entfernen
+        filename = filename.strip('_')  # Führende/nachfolgende Unterstriche entfernen
 
         document.filename = filename
 
